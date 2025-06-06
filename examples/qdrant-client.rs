@@ -29,7 +29,7 @@ async fn main() -> Result<(), QdrantError> {
 	client
 		.create_collection(
 			CreateCollectionBuilder::new(collection_name)
-				.vectors_config(VectorParamsBuilder::new(10, Distance::Cosine))
+				.vectors_config(VectorParamsBuilder::new(1024, Distance::Cosine))
 				.quantization_config(ScalarQuantizationBuilder::default()),
 		)
 		.await?;

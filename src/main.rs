@@ -1,4 +1,4 @@
-#![allow(unused, clippy::all)]
+// #![allow(unused, clippy::all)]
 #![feature(let_chains, try_blocks)]
 
 /*
@@ -13,15 +13,17 @@
 	cargo add itertools # iterators
 */
 
+mod qdrant_w;
+mod utils;
+
+use crate::{qdrant_w::QdrantW, utils::find_md_files};
 use anyhow::Result;
 use embed_anything::{
 	config::{SplittingStrategy, TextEmbedConfig},
 	embed_file,
-	embeddings::{
-		embed::{Embedder, EmbedderBuilder},
-		local::text_embedding::ONNXModel,
-	},
+	embeddings::{embed::Embedder, local::text_embedding::ONNXModel},
 };
+use sqlx::sqlite::SqlitePoolOptions;
 use std::sync::Arc;
 use thin_logger::log;
 
@@ -31,6 +33,10 @@ async fn main() -> Result<()> {
 	thin_logger::build(None).init(); // init logging
 
 	log::info!("Starting embedding process...");
+
+	let pool = SqlitePoolOptions::new().connect("test.db").await?;
+
+	let qdrant_w = QdrantW::try_new().await?;
 
 	let embedder = Arc::new(Embedder::from_pretrained_onnx(
 		"jina",
@@ -48,17 +54,24 @@ async fn main() -> Result<()> {
 			semantic_encoder: embedder.clone(),
 		});
 
-	let Some(embed_data_vec) =
-		embed_file("tap-md/index.md", &embedder, Some(&config), None).await?
-	else {
-		log::warn!("No embed data found for file: tap-md/index.md");
-		return Ok(());
-	};
+	let files_to_embed = find_md_files("tap-md")?;
 
-	for embed_data in &embed_data_vec {
-		if let Some(text) = &embed_data.text {
-			println!("{}", text);
-			println!("{}", "---".repeat(20));
+	log::info!("proceeding to embed {} files", files_to_embed.len());
+
+	for file in files_to_embed {
+		for embedding in embed_file(file, &embedder, Some(&config), None)
+			.await?
+			.expect("no data to embed?")
+		{
+			let contents = embedding.text.expect("expected text");
+			let row_id =
+				sqlx::query!("INSERT into test (contents) VALUES (?1)", contents)
+					.execute(&pool)
+					.await?
+					.last_insert_rowid();
+			log::info!("the id of the row is: {row_id}",);
+			let vec_e = embedding.embedding.to_dense()?;
+			qdrant_w.add_embedding(row_id as u64, vec_e).await?;
 		}
 	}
 

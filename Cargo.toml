@@ -18,3 +18,6 @@ ort-sys = "=2.0.0-rc.9"
 clap = { version = "4.5.39", features = ["derive"] }
 candle-core = "0.9.1"
 qdrant-client = "1.14.0"
+walkdir = "2.5.0"
+sqlx = { version = "0.8.6", features = ["sqlite", "runtime-tokio", "tls-native-tls", "macros"] }
+uuid = "1.17.0"

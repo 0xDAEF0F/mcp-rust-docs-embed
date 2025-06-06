@@ -2,3 +2,5 @@
 
 .cursor
 .env
+test.db
+.sqlx
