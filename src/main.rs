@@ -9,16 +9,13 @@
 	cargo add nestruct # nested structs
 */
 
-mod qdrant_w;
-mod utils;
-
-use crate::{qdrant_w::QdrantW, utils::find_md_files};
 use anyhow::Result;
 use embed_anything::{
 	config::{SplittingStrategy, TextEmbedConfig},
 	embed_file, embed_query,
 	embeddings::{embed::Embedder, local::text_embedding::ONNXModel},
 };
+use embed_anything_rs::{qdrant_w::QdrantW, utils::find_md_files};
 use qdrant_client::qdrant::point_id::PointIdOptions;
 use sqlx::sqlite::SqlitePoolOptions;
 use std::sync::Arc;

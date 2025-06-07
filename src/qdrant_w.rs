@@ -2,8 +2,8 @@ use anyhow::Result;
 use qdrant_client::{
 	Payload, Qdrant,
 	qdrant::{
-		CreateCollectionBuilder, Distance, PointStruct, QueryPointsBuilder,
-		SearchPointsBuilder, SearchResponse, UpsertPointsBuilder, VectorParamsBuilder,
+		CreateCollectionBuilder, Distance, PointStruct, SearchPointsBuilder,
+		SearchResponse, UpsertPointsBuilder, VectorParamsBuilder,
 	},
 };
 
