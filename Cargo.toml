@@ -19,6 +19,15 @@ clap = { version = "4.5.39", features = ["derive"] }
 candle-core = "0.9.1"
 qdrant-client = "1.14.0"
 walkdir = "2.5.0"
-sqlx = { version = "0.8.6", features = ["sqlite", "runtime-tokio", "tls-native-tls", "macros"] }
+sqlx = { version = "0.8.6", features = [
+   "sqlite",
+   "runtime-tokio",
+   "tls-native-tls",
+   "macros",
+] }
 uuid = "1.17.0"
 nestruct = "0.1.0"
+cargo = "0.84.0"
+scraper = "0.22.0"
+tempfile = "3.20.0"
+thiserror = "2.0.12"
