@@ -1,7 +1,10 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use embed_anything::embed_file;
-use embed_anything_rs::{data_store::DataStore, doc_loader, query_embedder::QueryEmbedder, utils::find_md_files};
+use embed_anything_rs::{
+	data_store::DataStore, doc_loader, query_embedder::QueryEmbedder,
+	utils::find_md_files,
+};
 use htmd::{
 	HtmlToMarkdown,
 	options::{HeadingStyle, Options},

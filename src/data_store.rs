@@ -134,16 +134,4 @@ impl DataStore {
 		self.qdrant_client.upsert_points(req).await?;
 		Ok(())
 	}
-
-	/// Query Qdrant only (legacy method for compatibility)
-	pub async fn query_embedding(
-		&self,
-		collection_name: &str,
-		query: Vec<f32>,
-		max_results: u64,
-	) -> Result<SearchResponse> {
-		let search_req = SearchPointsBuilder::new(collection_name, query, max_results);
-		let res = self.qdrant_client.search_points(search_req).await?;
-		Ok(res)
-	}
 }
