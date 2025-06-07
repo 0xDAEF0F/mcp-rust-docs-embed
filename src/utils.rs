@@ -21,20 +21,41 @@ pub fn find_md_files<P: AsRef<Path>>(dir: P) -> Result<Vec<PathBuf>> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use iter_tools::Itertools;
+	use std::fs;
+	use tempfile::TempDir;
 
 	#[test]
-	fn test_find_md_files_in_tap_md() {
-		let result = find_md_files("tap-md");
+	fn test_find_md_files_in_temp_dir() -> Result<()> {
+		let temp_dir = TempDir::new()?;
+		let temp_path = temp_dir.path();
 
-		assert!(result.is_ok(), "find_md_files should succeed");
+		let md_files_to_create = vec!["index.md", "readme.md", "nested/doc.md"];
 
-		let md_files = result.unwrap();
+		for file_path in &md_files_to_create {
+			let full_path = temp_path.join(file_path);
 
-		// should find at least one .md file (index.md)
-		assert!(!md_files.is_empty(), "should find at least one .md file");
+			// Create parent directory if needed
+			if let Some(parent) = full_path.parent() {
+				fs::create_dir_all(parent)?;
+			}
 
-		// all returned files should have .md extension
-		for file in &md_files {
+			// Create the .md file with some content
+			fs::write(&full_path, "# Test markdown file")?;
+		}
+
+		// Create some non-.md files that should be ignored
+		fs::write(temp_path.join("test.txt"), "text file")?;
+		fs::write(temp_path.join("config.json"), "{}")?;
+
+		// Test the function
+		let found_files = find_md_files(temp_path)?;
+
+		// Should find exactly 3 .md files
+		assert_eq!(found_files.len(), 3, "should find exactly 3 .md files");
+
+		// All found files should have .md extension
+		for file in &found_files {
 			assert_eq!(
 				file.extension().and_then(|s| s.to_str()),
 				Some("md"),
@@ -42,10 +63,22 @@ mod tests {
 			);
 		}
 
-		// print found files for verification
-		println!("Found {} .md files:", md_files.len());
-		for file in &md_files {
-			println!("  {file:?}");
+		// Check that specific files are found
+		let found_file_names = found_files
+			.iter()
+			.flat_map(|p| {
+				anyhow::Ok(p.strip_prefix(temp_path)?.to_string_lossy().to_string())
+			})
+			.collect_vec();
+
+		for expected_file in &md_files_to_create {
+			assert!(
+				found_file_names.iter().any(|f| f == expected_file),
+				"Expected file {expected_file} not found in results: \
+				 {found_file_names:?}"
+			);
 		}
+
+		Ok(())
 	}
 }
