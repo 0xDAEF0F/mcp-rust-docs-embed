@@ -1,8 +1,11 @@
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::Parser as _;
 use embed_anything::embed_file;
 use embed_anything_rs::{
-	data_store::DataStore, doc_loader, query_embedder::QueryEmbedder,
+	commands::{Cli, Commands},
+	data_store::DataStore,
+	doc_loader,
+	query_embedder::QueryEmbedder,
 	utils::find_md_files,
 };
 use htmd::{
@@ -10,49 +13,6 @@ use htmd::{
 	options::{HeadingStyle, Options},
 };
 use thin_logger::log;
-
-#[derive(Parser)]
-struct Cli {
-	#[command(subcommand)]
-	command: Commands,
-}
-
-#[derive(Subcommand)]
-enum Commands {
-	/// Create embeddings for all markdown files in a directory
-	Embed {
-		/// Crate name
-		crate_name: String,
-		/// Crate version
-		#[arg(long, short)]
-		version: String,
-	},
-	/// Query for similar embeddings
-	Query {
-		/// Query string to search for
-		query: String,
-		/// Crate name to query for
-		#[arg(long, short)]
-		crate_name: String,
-		/// Crate version
-		#[arg(long, short)]
-		version: String,
-		/// Number of results to return (default: 5)
-		#[arg(long, short, default_value = "5")]
-		limit: u64,
-	},
-	/// Generate documentation for a crate
-	GenDocs {
-		/// Crate name to generate docs for
-		crate_name: String,
-		/// Optional features to enable
-		#[arg(long, short)]
-		features: Vec<String>,
-		/// Crate version requirement
-		#[arg(long, short)]
-		version: String,
-	},
-}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -134,13 +94,17 @@ async fn gen_docs(crate_name: &str, version: &str, features: &[String]) -> Resul
 
 async fn embed_directory(crate_name: &str, version: &str) -> Result<()> {
 	let directory = format!("docs/{crate_name}/{version}");
-	
+
 	// Check if docs directory exists
 	if !std::path::Path::new(&directory).exists() {
-		eprintln!("Documentation directory '{}' does not exist. Please run 'GenDocs' first to generate documentation.", directory);
+		eprintln!(
+			"Documentation directory '{}' does not exist. Please run 'GenDocs' first to \
+			 generate documentation.",
+			directory
+		);
 		std::process::exit(1);
 	}
-	
+
 	log::info!("Starting embedding process for directory: {directory}");
 
 	let data_store = DataStore::try_new(crate_name, version).await?;
