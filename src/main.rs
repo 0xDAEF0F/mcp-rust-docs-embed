@@ -1,16 +1,11 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use embed_anything::{
-	config::{SplittingStrategy, TextEmbedConfig},
-	embed_file, embed_query,
-	embeddings::{embed::Embedder, local::text_embedding::ONNXModel},
-};
-use embed_anything_rs::{data_store::DataStore, doc_loader, utils::find_md_files};
+use embed_anything::embed_file;
+use embed_anything_rs::{data_store::DataStore, doc_loader, query_embedder::QueryEmbedder, utils::find_md_files};
 use htmd::{
 	HtmlToMarkdown,
 	options::{HeadingStyle, Options},
 };
-use std::sync::Arc;
 use thin_logger::log;
 
 #[derive(Parser)]
@@ -146,21 +141,9 @@ async fn embed_directory(directory: &str, db_name: &str, collection: &str) -> Re
 	// reset both the sqlite db and the qdrant collection
 	data_store.reset(db_name, collection).await?;
 
-	let embedder = Arc::new(Embedder::from_pretrained_onnx(
-		"jina",
-		Some(ONNXModel::JINAV3),
-		None,
-		None,
-		None,
-		None,
-	)?);
-
-	let config = TextEmbedConfig::default()
-		.with_chunk_size(1000, Some(0.0))
-		.with_batch_size(32)
-		.with_splitting_strategy(SplittingStrategy::Semantic {
-			semantic_encoder: embedder.clone(),
-		});
+	let query_embedder = QueryEmbedder::new()?;
+	let embedder = query_embedder.get_embedder();
+	let config = query_embedder.get_config();
 
 	let files_to_embed = find_md_files(directory)?;
 
@@ -169,7 +152,7 @@ async fn embed_directory(directory: &str, db_name: &str, collection: &str) -> Re
 	for file in files_to_embed {
 		log::info!("embedding file: {file:?}");
 
-		for embedding in embed_file(file, &embedder, Some(&config), None)
+		for embedding in embed_file(file, &embedder, Some(config), None)
 			.await?
 			.expect("no data to embed?")
 		{
@@ -198,29 +181,8 @@ async fn query_embeddings(
 
 	let data_store = DataStore::try_new(db_name, "test.db").await?;
 
-	let embedder = Arc::new(Embedder::from_pretrained_onnx(
-		"jina",
-		Some(ONNXModel::JINAV3),
-		None,
-		None,
-		None,
-		None,
-	)?);
-
-	let config = TextEmbedConfig::default()
-		.with_chunk_size(1000, Some(0.0))
-		.with_batch_size(32)
-		.with_splitting_strategy(SplittingStrategy::Semantic {
-			semantic_encoder: embedder.clone(),
-		});
-
-	let query_embeddings = embed_query(&[query], &embedder, Some(&config)).await?;
-
-	if query_embeddings.is_empty() {
-		anyhow::bail!("failed to generate query embedding");
-	}
-
-	let q_vec = query_embeddings[0].embedding.to_dense()?;
+	let query_embedder = QueryEmbedder::new()?;
+	let q_vec = query_embedder.embed_query(query).await?;
 
 	let results = data_store
 		.query_with_content(db_name, collection, q_vec, limit)
