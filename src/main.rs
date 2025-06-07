@@ -23,25 +23,25 @@ enum Commands {
 	Embed {
 		/// Directory path to search for markdown files
 		directory: String,
-		/// Database name (default: "test")
-		#[arg(long, default_value = "test")]
-		db_name: String,
-		/// Collection name (default: "test")
-		#[arg(long, default_value = "test")]
-		collection: String,
+		/// Crate name
+		#[arg(long, short)]
+		crate_name: String,
+		/// Crate version
+		#[arg(long, short)]
+		version: String,
 	},
 	/// Query for similar embeddings
 	Query {
 		/// Query string to search for
 		query: String,
-		/// Database name (default: "test")
-		#[arg(long, default_value = "test")]
-		db_name: String,
-		/// Collection name (default: "test")
-		#[arg(long, default_value = "test")]
-		collection: String,
+		/// Crate name to query for
+		#[arg(long, short)]
+		crate_name: String,
+		/// Crate version
+		#[arg(long, short)]
+		version: String,
 		/// Number of results to return (default: 5)
-		#[arg(long, default_value = "5")]
+		#[arg(long, short, default_value = "5")]
 		limit: u64,
 	},
 	/// Generate documentation for a crate
@@ -49,10 +49,10 @@ enum Commands {
 		/// Crate name to generate docs for
 		crate_name: String,
 		/// Optional features to enable
-		#[arg(long)]
+		#[arg(long, short)]
 		features: Vec<String>,
-		/// Crate version requirement (default: "*")
-		#[arg(long, default_value = "*")]
+		/// Crate version requirement
+		#[arg(long, short)]
 		version: String,
 	},
 }
@@ -67,18 +67,18 @@ async fn main() -> Result<()> {
 	match cli.command {
 		Commands::Embed {
 			directory,
-			db_name,
-			collection,
+			crate_name,
+			version,
 		} => {
-			embed_directory(&directory, &db_name, &collection).await?;
+			embed_directory(&directory, &crate_name, &version).await?;
 		}
 		Commands::Query {
 			query,
-			db_name,
-			collection,
+			crate_name,
+			version,
 			limit,
 		} => {
-			query_embeddings(&query, &db_name, &collection, limit).await?;
+			query_embeddings(&query, &crate_name, &version, limit).await?;
 		}
 		Commands::GenDocs {
 			crate_name,
@@ -136,13 +136,13 @@ async fn gen_docs(crate_name: &str, version: &str, features: &[String]) -> Resul
 	Ok(())
 }
 
-async fn embed_directory(directory: &str, db_name: &str, collection: &str) -> Result<()> {
+async fn embed_directory(directory: &str, crate_name: &str, version: &str) -> Result<()> {
 	log::info!("Starting embedding process for directory: {directory}");
 
-	let data_store = DataStore::try_new(db_name, "test.db").await?;
+	let data_store = DataStore::try_new(crate_name, version).await?;
 
 	// reset both the sqlite db and the qdrant collection
-	data_store.reset(db_name, collection).await?;
+	data_store.reset().await?;
 
 	let query_embedder = QueryEmbedder::new()?;
 	let embedder = query_embedder.get_embedder();
@@ -163,7 +163,7 @@ async fn embed_directory(directory: &str, db_name: &str, collection: &str) -> Re
 			let vec_e = embedding.embedding.to_dense()?;
 
 			let row_id = data_store
-				.add_embedding_with_content(db_name, collection, &contents, vec_e)
+				.add_embedding_with_content(&contents, vec_e)
 				.await?;
 
 			log::trace!("added embedding with id: {row_id}");
@@ -176,20 +176,18 @@ async fn embed_directory(directory: &str, db_name: &str, collection: &str) -> Re
 
 async fn query_embeddings(
 	query: &str,
-	db_name: &str,
-	collection: &str,
+	crate_name: &str,
+	version: &str,
 	limit: u64,
 ) -> Result<()> {
 	log::info!("querying for: {query}");
 
-	let data_store = DataStore::try_new(db_name, "test.db").await?;
+	let data_store = DataStore::try_new(crate_name, version).await?;
 
 	let query_embedder = QueryEmbedder::new()?;
 	let q_vec = query_embedder.embed_query(query).await?;
 
-	let results = data_store
-		.query_with_content(db_name, collection, q_vec, limit)
-		.await?;
+	let results = data_store.query_with_content(q_vec, limit).await?;
 
 	if results.is_empty() {
 		log::info!("no results found for query: {query}");

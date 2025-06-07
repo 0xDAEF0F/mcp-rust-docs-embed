@@ -15,10 +15,10 @@ async fn main() -> Result<()> {
 
 	log::info!("Starting embedding process...");
 
-	let data_store = DataStore::try_new("test", "test.db").await?;
+	let data_store = DataStore::try_new("test", "1.0.0").await?;
 
 	// reset both the sqlite db and the qdrant collection
-	data_store.reset("test", "test").await?;
+	data_store.reset().await?;
 
 	let embedder = Arc::new(Embedder::from_pretrained_onnx(
 		"jina",
@@ -49,7 +49,7 @@ async fn main() -> Result<()> {
 			let vec_e = embedding.embedding.to_dense()?;
 
 			let row_id = data_store
-				.add_embedding_with_content("test", "test", &contents, vec_e)
+				.add_embedding_with_content(&contents, vec_e)
 				.await?;
 
 			log::info!("added embedding with id: {row_id}");
@@ -63,7 +63,7 @@ async fn main() -> Result<()> {
 	let q_vec = query[0].embedding.to_dense()?;
 
 	let results = data_store
-		.query_with_content("test", "test", q_vec, 1)
+		.query_with_content(q_vec, 1)
 		.await?;
 
 	assert!(results.len() == 1, "expected 1 result");
