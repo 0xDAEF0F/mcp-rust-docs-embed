@@ -95,11 +95,7 @@ async fn main() -> Result<()> {
 }
 
 async fn gen_docs(crate_name: &str, version: &str, features: &[String]) -> Result<()> {
-	log::info!(
-		"Generating documentation for crate: {} (version: {})",
-		crate_name,
-		version
-	);
+	log::info!("Generating documentation for crate: {crate_name} (version: {version})");
 
 	let features_vec = features.to_vec();
 	let features_option = if features_vec.is_empty() {
@@ -122,12 +118,12 @@ async fn gen_docs(crate_name: &str, version: &str, features: &[String]) -> Resul
 		})
 		.build();
 
-	let docs_dir = format!("docs/{}", crate_name);
+	let docs_dir = format!("docs/{crate_name}");
 	std::fs::create_dir_all(&docs_dir)?;
 
 	for doc in documents {
 		let safe_path = doc.path.replace(['/', '\\'], "_");
-		let file_path = format!("{}/{}.md", docs_dir, safe_path);
+		let file_path = format!("{docs_dir}/{safe_path}.md");
 
 		// Convert HTML to markdown
 		let markdown_content = converter
@@ -135,7 +131,7 @@ async fn gen_docs(crate_name: &str, version: &str, features: &[String]) -> Resul
 			.map_err(|e| anyhow::anyhow!("Failed to convert HTML to markdown: {}", e))?;
 
 		std::fs::write(&file_path, &markdown_content)?;
-		log::info!("Saved documentation to: {}", file_path);
+		log::info!("Saved documentation to: {file_path}");
 	}
 
 	log::info!("Documentation generation complete");
@@ -143,7 +139,7 @@ async fn gen_docs(crate_name: &str, version: &str, features: &[String]) -> Resul
 }
 
 async fn embed_directory(directory: &str, db_name: &str, collection: &str) -> Result<()> {
-	log::info!("Starting embedding process for directory: {}", directory);
+	log::info!("Starting embedding process for directory: {directory}");
 
 	let data_store = DataStore::try_new(db_name, "test.db").await?;
 
@@ -171,7 +167,7 @@ async fn embed_directory(directory: &str, db_name: &str, collection: &str) -> Re
 	log::info!("proceeding to embed {} files", files_to_embed.len());
 
 	for file in files_to_embed {
-		log::info!("embedding file: {:?}", file);
+		log::info!("embedding file: {file:?}");
 
 		for embedding in embed_file(file, &embedder, Some(&config), None)
 			.await?
@@ -198,7 +194,7 @@ async fn query_embeddings(
 	collection: &str,
 	limit: u64,
 ) -> Result<()> {
-	log::info!("querying for: {}", query);
+	log::info!("querying for: {query}");
 
 	let data_store = DataStore::try_new(db_name, "test.db").await?;
 
@@ -231,7 +227,7 @@ async fn query_embeddings(
 		.await?;
 
 	if results.is_empty() {
-		log::info!("no results found for query: {}", query);
+		log::info!("no results found for query: {query}");
 		return Ok(());
 	}
 
@@ -239,7 +235,7 @@ async fn query_embeddings(
 
 	for (i, (score, content)) in results.iter().enumerate() {
 		println!("\n--- Result {} (score: {:.4}) ---", i + 1, score);
-		println!("{}", content);
+		println!("{content}");
 	}
 
 	Ok(())
