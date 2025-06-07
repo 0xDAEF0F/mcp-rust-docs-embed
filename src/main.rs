@@ -21,10 +21,7 @@ struct Cli {
 enum Commands {
 	/// Create embeddings for all markdown files in a directory
 	Embed {
-		/// Directory path to search for markdown files
-		directory: String,
 		/// Crate name
-		#[arg(long, short)]
 		crate_name: String,
 		/// Crate version
 		#[arg(long, short)]
@@ -66,11 +63,10 @@ async fn main() -> Result<()> {
 
 	match cli.command {
 		Commands::Embed {
-			directory,
 			crate_name,
 			version,
 		} => {
-			embed_directory(&directory, &crate_name, &version).await?;
+			embed_directory(&crate_name, &version).await?;
 		}
 		Commands::Query {
 			query,
@@ -116,7 +112,7 @@ async fn gen_docs(crate_name: &str, version: &str, features: &[String]) -> Resul
 		})
 		.build();
 
-	let docs_dir = format!("docs/{crate_name}");
+	let docs_dir = format!("docs/{crate_name}/{version}");
 	std::fs::create_dir_all(&docs_dir)?;
 
 	for doc in documents {
@@ -136,7 +132,15 @@ async fn gen_docs(crate_name: &str, version: &str, features: &[String]) -> Resul
 	Ok(())
 }
 
-async fn embed_directory(directory: &str, crate_name: &str, version: &str) -> Result<()> {
+async fn embed_directory(crate_name: &str, version: &str) -> Result<()> {
+	let directory = format!("docs/{crate_name}/{version}");
+	
+	// Check if docs directory exists
+	if !std::path::Path::new(&directory).exists() {
+		eprintln!("Documentation directory '{}' does not exist. Please run 'GenDocs' first to generate documentation.", directory);
+		std::process::exit(1);
+	}
+	
 	log::info!("Starting embedding process for directory: {directory}");
 
 	let data_store = DataStore::try_new(crate_name, version).await?;

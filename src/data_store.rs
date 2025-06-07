@@ -25,16 +25,17 @@ impl DataStore {
 
 		// Generate deterministic names
 		let collection_name = Self::generate_collection_name(crate_name, version);
-		let sqlite_path = Self::generate_sqlite_path(crate_name, version);
+		let sqlite_path = Self::generate_sqlite_path();
 
-		// setup qdrant collection
-		_ = qdrant_client.delete_collection(&collection_name).await;
+		// setup qdrant collection - only create if it doesn't exist
+		let collection_exists = qdrant_client.collection_exists(&collection_name).await?;
+		if !collection_exists {
+			let collection = CreateCollectionBuilder::new(&collection_name)
+				.vectors_config(VectorParamsBuilder::new(1024, Distance::Cosine));
 
-		let collection = CreateCollectionBuilder::new(&collection_name)
-			.vectors_config(VectorParamsBuilder::new(1024, Distance::Cosine));
-
-		let res = qdrant_client.create_collection(collection).await?;
-		assert!(res.result, "collection could not be created");
+			let res = qdrant_client.create_collection(collection).await?;
+			assert!(res.result, "collection could not be created");
+		}
 
 		// setup sqlite connection
 		let sql_pool = SqlitePoolOptions::new().connect(&sqlite_path).await?;
@@ -166,13 +167,8 @@ impl DataStore {
 		format!("{}_v{}", crate_name.replace('-', "_"), version.replace('.', "_"))
 	}
 
-	/// Generate deterministic SQLite database path from crate name and version
-	fn generate_sqlite_path(crate_name: &str, version: &str) -> String {
-		let db_name = format!("{}_v{}.db", crate_name.replace('-', "_"), version.replace('.', "_"));
-		
-		// Create data directory if it doesn't exist
-		std::fs::create_dir_all("data").ok();
-		
-		format!("data/{}", db_name)
+	/// Generate SQLite database path (constant for all crates)
+	fn generate_sqlite_path() -> String {
+		"test.db".to_string()
 	}
 }
