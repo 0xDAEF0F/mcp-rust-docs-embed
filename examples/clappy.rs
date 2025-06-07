@@ -7,7 +7,7 @@ use embed_anything::{
 	embed_file, embed_query,
 	embeddings::{embed::Embedder, local::text_embedding::ONNXModel},
 };
-use embed_anything_rs::{data_store::DataStore, utils::find_md_files};
+use embed_anything_rs::{data_store::DataStore, doc_loader, utils::find_md_files};
 use std::sync::Arc;
 use thin_logger::log;
 
@@ -44,6 +44,17 @@ enum Commands {
 		#[arg(long, default_value = "5")]
 		limit: u64,
 	},
+	/// Generate documentation for a crate
+	GenDocs {
+		/// Crate name to generate docs for
+		crate_name: String,
+		/// Optional features to enable
+		#[arg(long)]
+		features: Vec<String>,
+		/// Crate version requirement (default: "*")
+		#[arg(long, default_value = "*")]
+		version: String,
+	},
 }
 
 #[tokio::main]
@@ -69,8 +80,48 @@ async fn main() -> Result<()> {
 		} => {
 			query_embeddings(&query, &db_name, &collection, limit).await?;
 		}
+		Commands::GenDocs {
+			crate_name,
+			features,
+			version,
+		} => {
+			gen_docs(&crate_name, &version, &features).await?;
+		}
 	}
 
+	Ok(())
+}
+
+async fn gen_docs(crate_name: &str, version: &str, features: &[String]) -> Result<()> {
+	log::info!(
+		"Generating documentation for crate: {} (version: {})",
+		crate_name,
+		version
+	);
+
+	let features_vec = features.to_vec();
+	let features_option = if features_vec.is_empty() {
+		None
+	} else {
+		Some(&features_vec)
+	};
+
+	let documents = doc_loader::load_documents(crate_name, version, features_option)
+		.map_err(|e| anyhow::anyhow!("Failed to load documents: {}", e))?;
+
+	log::info!("Loaded {} documents", documents.len());
+
+	std::fs::create_dir_all(crate_name)?;
+
+	for doc in documents {
+		let safe_path = doc.path.replace(['/', '\\'], "_");
+		let file_path = format!("{}/{}.html", crate_name, safe_path);
+
+		std::fs::write(&file_path, &doc.html_content)?;
+		log::info!("Saved documentation to: {}", file_path);
+	}
+
+	log::info!("Documentation generation complete");
 	Ok(())
 }
 

@@ -38,6 +38,7 @@ pub enum DocLoaderError {
 pub struct Document {
 	pub path: String,
 	pub content: String,
+	pub html_content: String,
 }
 
 /// Generates documentation for a given crate in a temporary directory,
@@ -339,6 +340,7 @@ edition = "2021"
 				documents.push(Document {
 					path: path_str,
 					content: text_content,
+					html_content: html_content.clone(),
 				});
 			} else {
 				eprintln!(
