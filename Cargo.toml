@@ -21,3 +21,4 @@ qdrant-client = "1.14.0"
 walkdir = "2.5.0"
 sqlx = { version = "0.8.6", features = ["sqlite", "runtime-tokio", "tls-native-tls", "macros"] }
 uuid = "1.17.0"
+nestruct = "0.1.0"

@@ -83,7 +83,7 @@ async fn main() -> Result<()> {
 
 	let q_vec = query[0].embedding.to_dense()?;
 
-	let res = qdrant_w.query("test", q_vec, 1).await?;
+	let res = qdrant_w.query_embedding("test", q_vec, 1).await?;
 
 	assert!(res.result.len() == 1, "expected 1 result");
 

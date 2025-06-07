@@ -4,3 +4,4 @@
 .env
 test.db
 .sqlx
+script.sql

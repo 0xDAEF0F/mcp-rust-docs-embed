@@ -48,7 +48,7 @@ impl QdrantW {
 		Ok(())
 	}
 
-	pub async fn query(
+	pub async fn query_embedding(
 		&self,
 		collection_name: &str,
 		query: Vec<f32>,
