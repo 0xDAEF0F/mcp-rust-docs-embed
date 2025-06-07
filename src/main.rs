@@ -180,7 +180,7 @@ async fn embed_directory(directory: &str, db_name: &str, collection: &str) -> Re
 				.add_embedding_with_content(db_name, collection, &contents, vec_e)
 				.await?;
 
-			log::info!("added embedding with id: {row_id}");
+			log::trace!("added embedding with id: {row_id}");
 		}
 	}
 
