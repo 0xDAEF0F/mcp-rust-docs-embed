@@ -8,6 +8,7 @@ use embed_anything::{
 	embeddings::{embed::Embedder, local::text_embedding::ONNXModel},
 };
 use embed_anything_rs::{data_store::DataStore, doc_loader, utils::find_md_files};
+use htmd::{HtmlToMarkdown, options::{Options, HeadingStyle}};
 use std::sync::Arc;
 use thin_logger::log;
 
@@ -111,13 +112,26 @@ async fn gen_docs(crate_name: &str, version: &str, features: &[String]) -> Resul
 
 	log::info!("Loaded {} documents", documents.len());
 
+	// Create HTML to markdown converter
+	let converter = HtmlToMarkdown::builder()
+		.skip_tags(vec!["script", "style", "meta", "head"])
+		.options(Options {
+			heading_style: HeadingStyle::Atx, // Use # for headings
+			..Default::default()
+		})
+		.build();
+
 	std::fs::create_dir_all(crate_name)?;
 
 	for doc in documents {
 		let safe_path = doc.path.replace(['/', '\\'], "_");
-		let file_path = format!("{}/{}.html", crate_name, safe_path);
+		let file_path = format!("{}/{}.md", crate_name, safe_path);
 
-		std::fs::write(&file_path, &doc.html_content)?;
+		// Convert HTML to markdown
+		let markdown_content = converter.convert(&doc.html_content)
+			.map_err(|e| anyhow::anyhow!("Failed to convert HTML to markdown: {}", e))?;
+
+		std::fs::write(&file_path, &markdown_content)?;
 		log::info!("Saved documentation to: {}", file_path);
 	}
 

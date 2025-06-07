@@ -1,8 +1,12 @@
 {
-  "enableAllProjectMcpServers": false,
   "permissions": {
     "allow": [
-      "Bash(cargo build:*)"
+      "Bash(cargo build:*)",
+      "WebFetch(domain:docs.rs)",
+      "WebFetch(domain:github.com)",
+      "Bash(cargo check:*)",
+      "Bash(cargo run:*)"
     ]
-  }
+  },
+  "enableAllProjectMcpServers": false
 }

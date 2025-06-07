@@ -1553,6 +1553,7 @@ dependencies = [
  "docx-rust",
  "dotenvy",
  "embed_anything",
+ "htmd",
  "nestruct",
  "ort-sys",
  "qdrant-client",

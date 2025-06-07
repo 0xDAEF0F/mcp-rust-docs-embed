@@ -7,3 +7,4 @@ test.db
 script.sql
 src.bak
 bon
+serde
