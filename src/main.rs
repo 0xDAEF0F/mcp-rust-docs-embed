@@ -122,11 +122,12 @@ async fn gen_docs(crate_name: &str, version: &str, features: &[String]) -> Resul
 		})
 		.build();
 
-	std::fs::create_dir_all(crate_name)?;
+	let docs_dir = format!("docs/{}", crate_name);
+	std::fs::create_dir_all(&docs_dir)?;
 
 	for doc in documents {
 		let safe_path = doc.path.replace(['/', '\\'], "_");
-		let file_path = format!("{}/{}.md", crate_name, safe_path);
+		let file_path = format!("{}/{}.md", docs_dir, safe_path);
 
 		// Convert HTML to markdown
 		let markdown_content = converter
