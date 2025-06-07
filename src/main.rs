@@ -15,9 +15,7 @@ use embed_anything::{
 	embed_file, embed_query,
 	embeddings::{embed::Embedder, local::text_embedding::ONNXModel},
 };
-use embed_anything_rs::{qdrant_w::QdrantW, utils::find_md_files};
-use qdrant_client::qdrant::point_id::PointIdOptions;
-use sqlx::sqlite::SqlitePoolOptions;
+use embed_anything_rs::{data_store::DataStore, utils::find_md_files};
 use std::sync::Arc;
 use thin_logger::log;
 
@@ -28,12 +26,10 @@ async fn main() -> Result<()> {
 
 	log::info!("Starting embedding process...");
 
-	let pool = SqlitePoolOptions::new().connect("test.db").await?;
+	let data_store = DataStore::try_new("test", "test.db").await?;
 
-	let qdrant_w = QdrantW::try_new("test").await?;
-
-	// reset the sqlite db and the qdrant collection
-	sqlx::query!("DELETE FROM test").execute(&pool).await?;
+	// reset both the sqlite db and the qdrant collection
+	data_store.reset("test", "test").await?;
 
 	let embedder = Arc::new(Embedder::from_pretrained_onnx(
 		"jina",
@@ -61,16 +57,13 @@ async fn main() -> Result<()> {
 			.expect("no data to embed?")
 		{
 			let contents = embedding.text.expect("expected text");
-			let row_id =
-				sqlx::query!("INSERT into test (contents) VALUES (?1)", contents)
-					.execute(&pool)
-					.await?
-					.last_insert_rowid();
-			log::info!("the id of the row is: {row_id}",);
 			let vec_e = embedding.embedding.to_dense()?;
-			qdrant_w
-				.add_embedding("test", row_id.try_into()?, vec_e)
+
+			let row_id = data_store
+				.add_embedding_with_content("test", "test", &contents, vec_e)
 				.await?;
+
+			log::info!("added embedding with id: {row_id}");
 		}
 	}
 
@@ -80,27 +73,15 @@ async fn main() -> Result<()> {
 
 	let q_vec = query[0].embedding.to_dense()?;
 
-	let res = qdrant_w.query_embedding("test", q_vec, 1).await?;
-
-	assert!(res.result.len() == 1, "expected 1 result");
-
-	let res_id = res.result[0]
-		.clone()
-		.id
-		.expect("expected id")
-		.point_id_options
-		.expect("no point id");
-
-	let PointIdOptions::Num(n) = res_id else {
-		panic!("expected num id");
-	};
-	let n = n as i64;
-
-	let res_contents = sqlx::query!("SELECT contents FROM test WHERE id = ?", n)
-		.fetch_one(&pool)
+	let results = data_store
+		.query_with_content("test", "test", q_vec, 1)
 		.await?;
 
-	log::info!("the result is: {res_contents:?}",);
+	assert!(results.len() == 1, "expected 1 result");
+
+	let (score, content) = &results[0];
+
+	log::info!("search result (score: {score}): {content}");
 
 	Ok(())
 }

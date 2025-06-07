@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use embed_anything_rs::{qdrant_w::QdrantW, utils::find_md_files};
+use embed_anything_rs::utils::find_md_files;
 use nestruct::flatten;
 
 #[derive(Parser)]
