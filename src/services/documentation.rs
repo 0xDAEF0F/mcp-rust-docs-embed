@@ -18,11 +18,18 @@ impl DocumentationService {
 	pub async fn generate_docs(
 		&self,
 		crate_name: &str,
-		version: &str,
+		version: Option<&str>,
 		features: &[String],
 	) -> Result<()> {
+		// Use "*" for cargo (latest) as default if no version specified or "latest" is
+		// specified
+		let version_req = match version {
+			Some("latest") | None => "*",
+			Some(v) => v,
+		};
+
 		log::info!(
-			"Generating documentation for crate: {crate_name} (version: {version})"
+			"Generating documentation for crate: {crate_name} (version: {version_req})"
 		);
 
 		let features_vec = features.to_vec();
@@ -32,10 +39,24 @@ impl DocumentationService {
 			Some(&features_vec)
 		};
 
-		let documents = doc_loader::load_documents(crate_name, version, features_option)
-			.map_err(|e| anyhow::anyhow!("Failed to load documents: {}", e))?;
+		// Generate docs and get both the documents and resolved version
+		let (documents, resolved_version) = if version_req == "*" {
+			doc_loader::load_documents_with_version(
+				crate_name,
+				version_req,
+				features_option,
+			)
+			.map_err(|e| anyhow::anyhow!("Failed to load documents: {}", e))?
+		} else {
+			let docs =
+				doc_loader::load_documents(crate_name, version_req, features_option)
+					.map_err(|e| anyhow::anyhow!("Failed to load documents: {}", e))?;
+			(docs, version_req.to_string())
+		};
 
 		log::info!("Loaded {} documents", documents.len());
+
+		log::info!("Resolved version: {resolved_version}");
 
 		let converter = HtmlToMarkdown::builder()
 			.skip_tags(vec!["script", "style", "meta", "head"])
@@ -45,7 +66,7 @@ impl DocumentationService {
 			})
 			.build();
 
-		let docs_dir = format!("docs/{crate_name}/{version}");
+		let docs_dir = format!("docs/{crate_name}/{resolved_version}");
 		std::fs::create_dir_all(&docs_dir)?;
 
 		for doc in documents {

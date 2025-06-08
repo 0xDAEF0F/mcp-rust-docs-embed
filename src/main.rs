@@ -25,7 +25,7 @@ async fn main() -> Result<()> {
 		} => {
 			let doc_service = DocumentationService::new(config);
 			doc_service
-				.generate_docs(&crate_name, &version, &features)
+				.generate_docs(&crate_name, version.as_deref(), &features)
 				.await?;
 		}
 		Commands::Embed {

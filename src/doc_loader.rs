@@ -15,12 +15,12 @@ pub struct Document {
 /// Generates documentation for a given crate in a temporary directory,
 /// then loads and parses the HTML documents.
 /// Extracts text content from the main content area of rustdoc generated HTML.
-pub fn load_documents(
+/// Returns both the documents and the resolved version.
+pub fn load_documents_with_version(
 	crate_name: &str,
 	crate_version_req: &str,
 	features: Option<&Vec<String>>,
-) -> Result<Vec<Document>> {
-	let mut documents = Vec::new();
+) -> Result<(Vec<Document>, String)> {
 
 	// Generate documentation using the new DocGenerator
 	let features_vec = features.cloned();
@@ -29,13 +29,66 @@ pub fn load_documents(
 
 	eprintln!("Using documentation path: {}", docs_path.display());
 
+	// Extract version from the generated docs path or index.html
+	let resolved_version = extract_version_from_docs(&docs_path, crate_name)?;
+
 	// Define the CSS selector for the main content area in rustdoc HTML
 	// This might need adjustment based on the exact rustdoc version/theme
 	let content_selector = Selector::parse("section#main-content.content")
 		.map_err(|e| anyhow::anyhow!("Failed to parse CSS selector: {}", e))?;
 
+	// ... rest of the document loading logic ...
+	let documents_result = load_documents_internal(&docs_path, &content_selector)?;
+	
+	Ok((documents_result, resolved_version))
+}
+
+fn extract_version_from_docs(docs_path: &PathBuf, crate_name: &str) -> Result<String> {
+	// Try to find the temp directory containing the Cargo.lock
+	let mut temp_dir = docs_path.clone();
+	
+	// Go up from docs_path (e.g., .../doc/bon) to find the temp directory root
+	while temp_dir.parent().is_some() {
+		temp_dir = temp_dir.parent().unwrap().to_path_buf();
+		
+		let cargo_lock = temp_dir.join("Cargo.lock");
+		if cargo_lock.exists() {
+			let content = std::fs::read_to_string(&cargo_lock)?;
+			
+			// Look for the crate in Cargo.lock
+			// Format is like:
+			// [[package]]
+			// name = "bon"
+			// version = "3.6.3"
+			if let Some(package_start) = content.find(&format!("name = \"{}\"", crate_name)) {
+				// Look for the version line after the name
+				if let Some(version_start) = content[package_start..].find("version = \"") {
+					let version_pos = package_start + version_start + "version = \"".len();
+					if let Some(version_end) = content[version_pos..].find('"') {
+						let version = &content[version_pos..version_pos + version_end];
+						return Ok(version.to_string());
+					}
+				}
+			}
+		}
+	}
+	
+	// Fallback: try to extract from directory name if docs_path contains version info
+	if let Some(dir_name) = docs_path.file_name().and_then(|n| n.to_str()) {
+		// If the directory name looks like a version (contains dots and numbers)
+		if dir_name.contains('.') && dir_name.chars().any(|c| c.is_ascii_digit()) {
+			return Ok(dir_name.to_string());
+		}
+	}
+	
+	Err(anyhow::anyhow!("Could not extract version from generated documentation"))
+}
+
+fn load_documents_internal(docs_path: &PathBuf, content_selector: &Selector) -> Result<Vec<Document>> {
+	let mut documents = Vec::new();
+
 	// --- Collect all HTML file paths first ---
-	let all_html_paths: Vec<PathBuf> = WalkDir::new(&docs_path)
+	let all_html_paths: Vec<PathBuf> = WalkDir::new(docs_path)
 		.into_iter()
 		.filter_map(Result::ok) // Ignore errors during iteration
 		.filter(|e| {
@@ -206,5 +259,17 @@ pub fn load_documents(
 		}
 	}
 
+	Ok(documents)
+}
+
+/// Generates documentation for a given crate in a temporary directory,
+/// then loads and parses the HTML documents.
+/// Extracts text content from the main content area of rustdoc generated HTML.
+pub fn load_documents(
+	crate_name: &str,
+	crate_version_req: &str,
+	features: Option<&Vec<String>>,
+) -> Result<Vec<Document>> {
+	let (documents, _version) = load_documents_with_version(crate_name, crate_version_req, features)?;
 	Ok(documents)
 }
