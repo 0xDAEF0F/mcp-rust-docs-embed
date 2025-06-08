@@ -3,7 +3,7 @@
 test.db
 .sqlx
 script.sql
-src.bak
+
 docs
 
 .cursor
