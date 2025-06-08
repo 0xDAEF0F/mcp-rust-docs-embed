@@ -7,3 +7,6 @@ test.db
 script.sql
 src.bak
 docs
+.cursor
+.claude
+.env
