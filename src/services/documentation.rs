@@ -18,18 +18,11 @@ impl DocumentationService {
 	pub async fn generate_docs(
 		&self,
 		crate_name: &str,
-		version: Option<&str>,
+		version: &str,
 		features: &[String],
 	) -> Result<()> {
-		// Use "*" for cargo (latest) as default if no version specified or "latest" is
-		// specified
-		let version_req = match version {
-			Some("latest") | None => "*",
-			Some(v) => v,
-		};
-
 		log::info!(
-			"Generating documentation for crate: {crate_name} (version: {version_req})"
+			"Generating documentation for crate: {crate_name} (version: {version})"
 		);
 
 		let features_vec = features.to_vec();
@@ -40,18 +33,13 @@ impl DocumentationService {
 		};
 
 		// Generate docs and get both the documents and resolved version
-		let (documents, resolved_version) = if version_req == "*" {
-			doc_loader::load_documents_with_version(
-				crate_name,
-				version_req,
-				features_option,
-			)
-			.map_err(|e| anyhow::anyhow!("Failed to load documents: {}", e))?
+		let (documents, resolved_version) = if version == "*" {
+			doc_loader::load_documents_with_version(crate_name, version, features_option)
+				.map_err(|e| anyhow::anyhow!("Failed to load documents: {}", e))?
 		} else {
-			let docs =
-				doc_loader::load_documents(crate_name, version_req, features_option)
-					.map_err(|e| anyhow::anyhow!("Failed to load documents: {}", e))?;
-			(docs, version_req.to_string())
+			let docs = doc_loader::load_documents(crate_name, version, features_option)
+				.map_err(|e| anyhow::anyhow!("Failed to load documents: {}", e))?;
+			(docs, version.to_string())
 		};
 
 		log::info!("Loaded {} documents", documents.len());

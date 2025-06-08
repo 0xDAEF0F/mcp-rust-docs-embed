@@ -38,7 +38,7 @@ pub enum Commands {
 		#[arg(long, short)]
 		features: Vec<String>,
 		/// Crate version requirement (defaults to latest)
-		#[arg(long, short)]
-		version: Option<String>,
+		#[arg(long, short, default_value = "*")]
+		version: String,
 	},
 }
