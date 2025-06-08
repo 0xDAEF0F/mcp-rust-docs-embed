@@ -95,12 +95,10 @@ async fn gen_docs(crate_name: &str, version: &str, features: &[String]) -> Resul
 async fn embed_directory(crate_name: &str, version: &str) -> Result<()> {
 	let directory = format!("docs/{crate_name}/{version}");
 
-	// Check if docs directory exists
 	if !std::path::Path::new(&directory).exists() {
 		eprintln!(
-			"Documentation directory '{}' does not exist. Please run 'GenDocs' first to \
-			 generate documentation.",
-			directory
+			"Documentation directory '{directory}' does not exist. Please run 'GenDocs' \
+			 first to generate documentation."
 		);
 		std::process::exit(1);
 	}
