@@ -1,4 +1,4 @@
-use crate::{config::AppConfig, doc_loader};
+use crate::doc_loader;
 use anyhow::{Context, Result};
 use htmd::{
 	HtmlToMarkdown,
@@ -6,17 +6,10 @@ use htmd::{
 };
 use thin_logger::log;
 
-pub struct DocumentationService {
-	config: AppConfig,
-}
+pub struct DocumentationService;
 
 impl DocumentationService {
-	pub fn new(config: AppConfig) -> Self {
-		Self { config }
-	}
-
 	pub async fn generate_docs(
-		&self,
 		crate_name: &str,
 		version: &str,
 		features: &[String],

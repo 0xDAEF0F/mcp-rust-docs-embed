@@ -1,18 +1,11 @@
-use crate::{config::AppConfig, data_store::DataStore, query_embedder::QueryEmbedder};
+use crate::{data_store::DataStore, query_embedder::QueryEmbedder};
 use anyhow::Result;
 use thin_logger::log;
 
-pub struct QueryService {
-	config: AppConfig,
-}
+pub struct QueryService;
 
 impl QueryService {
-	pub fn new(config: AppConfig) -> Self {
-		Self { config }
-	}
-
 	pub async fn query_embeddings(
-		&self,
 		query: &str,
 		crate_name: &str,
 		version: &str,
@@ -46,17 +39,6 @@ impl QueryService {
 #[cfg(test)]
 mod tests {
 	use super::*;
-
-	#[test]
-	fn test_query_service_creation() {
-		let config = AppConfig {
-			qdrant_url: "http://localhost:6334".to_string(),
-			sqlite_url: "sqlite::memory:".to_string(),
-		};
-
-		let service = QueryService::new(config);
-		assert_eq!(service.config.qdrant_url, "http://localhost:6334");
-	}
 
 	#[test]
 	fn test_print_results_empty() {

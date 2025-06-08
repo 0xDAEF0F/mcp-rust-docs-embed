@@ -1,16 +1,9 @@
-use anyhow::Result;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct AppConfig {
 	pub qdrant_url: String,
 	pub sqlite_url: String,
-}
-
-impl AppConfig {
-	pub fn from_env() -> Result<Self> {
-		Ok(envy::from_env::<Self>()?)
-	}
 }
 
 #[derive(Debug, Clone)]

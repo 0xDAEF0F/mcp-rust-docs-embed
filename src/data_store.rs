@@ -19,7 +19,7 @@ pub struct DataStore {
 impl DataStore {
 	/// Initialize a new data store with both Qdrant and SQLite connections
 	pub async fn try_new(crate_name: &str, version: &str) -> Result<Self> {
-		let config = AppConfig::from_env()?;
+		let config = envy::from_env::<AppConfig>()?;
 
 		let qdrant_client = Qdrant::from_url(&config.qdrant_url).build()?;
 

@@ -1,32 +1,12 @@
-use crate::{
-	config::{AppConfig, EmbeddingConfig},
-	data_store::DataStore,
-	query_embedder::QueryEmbedder,
-	utils::find_md_files,
-};
+use crate::{data_store::DataStore, query_embedder::QueryEmbedder, utils::find_md_files};
 use anyhow::Result;
 use embed_anything::embed_file;
 use thin_logger::log;
 
-pub struct EmbeddingService {
-	config: AppConfig,
-	embedding_config: EmbeddingConfig,
-}
+pub struct EmbeddingService;
 
 impl EmbeddingService {
-	pub fn new(config: AppConfig) -> Self {
-		Self {
-			config,
-			embedding_config: EmbeddingConfig::default(),
-		}
-	}
-
-	pub fn with_embedding_config(mut self, embedding_config: EmbeddingConfig) -> Self {
-		self.embedding_config = embedding_config;
-		self
-	}
-
-	pub async fn embed_directory(&self, crate_name: &str, version: &str) -> Result<()> {
+	pub async fn embed_directory(crate_name: &str, version: &str) -> Result<()> {
 		let directory = format!("docs/{crate_name}/{version}");
 
 		if !std::path::Path::new(&directory).exists() {
@@ -67,6 +47,7 @@ impl EmbeddingService {
 		}
 
 		log::info!("finished embedding all files");
+
 		Ok(())
 	}
 }
