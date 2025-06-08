@@ -1,7 +1,11 @@
 use crate::doc_generator::DocGenerator;
 use anyhow::Result;
 use scraper::{Html, Selector};
-use std::{collections::HashMap, fs, path::PathBuf};
+use std::{
+	collections::HashMap,
+	fs,
+	path::{Path, PathBuf},
+};
 use walkdir::WalkDir;
 
 // Simple struct to hold document content, maybe add path later if needed
@@ -21,7 +25,6 @@ pub fn load_documents_with_version(
 	crate_version_req: &str,
 	features: Option<&Vec<String>>,
 ) -> Result<(Vec<Document>, String)> {
-
 	// Generate documentation using the new DocGenerator
 	let features_vec = features.cloned();
 	let doc_generator = DocGenerator::new(crate_name, crate_version_req, features_vec)?;
@@ -39,31 +42,34 @@ pub fn load_documents_with_version(
 
 	// ... rest of the document loading logic ...
 	let documents_result = load_documents_internal(&docs_path, &content_selector)?;
-	
+
 	Ok((documents_result, resolved_version))
 }
 
-fn extract_version_from_docs(docs_path: &PathBuf, crate_name: &str) -> Result<String> {
-	// Try to find the temp directory containing the Cargo.lock
-	let mut temp_dir = docs_path.clone();
-	
+fn extract_version_from_docs(docs_path: &Path, crate_name: &str) -> Result<String> {
+	let mut temp_dir = docs_path;
+
 	// Go up from docs_path (e.g., .../doc/bon) to find the temp directory root
 	while temp_dir.parent().is_some() {
-		temp_dir = temp_dir.parent().unwrap().to_path_buf();
-		
+		temp_dir = temp_dir.parent().unwrap();
+
 		let cargo_lock = temp_dir.join("Cargo.lock");
 		if cargo_lock.exists() {
 			let content = std::fs::read_to_string(&cargo_lock)?;
-			
+
 			// Look for the crate in Cargo.lock
 			// Format is like:
 			// [[package]]
 			// name = "bon"
 			// version = "3.6.3"
-			if let Some(package_start) = content.find(&format!("name = \"{}\"", crate_name)) {
+			if let Some(package_start) =
+				content.find(&format!("name = \"{}\"", crate_name))
+			{
 				// Look for the version line after the name
-				if let Some(version_start) = content[package_start..].find("version = \"") {
-					let version_pos = package_start + version_start + "version = \"".len();
+				if let Some(version_start) = content[package_start..].find("version = \"")
+				{
+					let version_pos =
+						package_start + version_start + "version = \"".len();
 					if let Some(version_end) = content[version_pos..].find('"') {
 						let version = &content[version_pos..version_pos + version_end];
 						return Ok(version.to_string());
@@ -72,7 +78,7 @@ fn extract_version_from_docs(docs_path: &PathBuf, crate_name: &str) -> Result<St
 			}
 		}
 	}
-	
+
 	// Fallback: try to extract from directory name if docs_path contains version info
 	if let Some(dir_name) = docs_path.file_name().and_then(|n| n.to_str()) {
 		// If the directory name looks like a version (contains dots and numbers)
@@ -80,11 +86,16 @@ fn extract_version_from_docs(docs_path: &PathBuf, crate_name: &str) -> Result<St
 			return Ok(dir_name.to_string());
 		}
 	}
-	
-	Err(anyhow::anyhow!("Could not extract version from generated documentation"))
+
+	Err(anyhow::anyhow!(
+		"Could not extract version from generated documentation"
+	))
 }
 
-fn load_documents_internal(docs_path: &PathBuf, content_selector: &Selector) -> Result<Vec<Document>> {
+fn load_documents_internal(
+	docs_path: &PathBuf,
+	content_selector: &Selector,
+) -> Result<Vec<Document>> {
 	let mut documents = Vec::new();
 
 	// --- Collect all HTML file paths first ---
@@ -206,7 +217,7 @@ fn load_documents_internal(docs_path: &PathBuf, content_selector: &Selector) -> 
 	// --- Process the filtered list of files ---
 	for path in paths_to_process {
 		// Calculate path relative to the docs_path root
-		let relative_path = match path.strip_prefix(&docs_path) {
+		let relative_path = match path.strip_prefix(docs_path) {
 			Ok(p) => p.to_path_buf(),
 			Err(e) => {
 				eprintln!(
@@ -231,7 +242,7 @@ fn load_documents_internal(docs_path: &PathBuf, content_selector: &Selector) -> 
 
 		let document = Html::parse_document(&html_content);
 
-		if let Some(main_content_element) = document.select(&content_selector).next() {
+		if let Some(main_content_element) = document.select(content_selector).next() {
 			let text_content: String = main_content_element
 				.text()
 				.map(|s| s.trim())
@@ -270,6 +281,7 @@ pub fn load_documents(
 	crate_version_req: &str,
 	features: Option<&Vec<String>>,
 ) -> Result<Vec<Document>> {
-	let (documents, _version) = load_documents_with_version(crate_name, crate_version_req, features)?;
+	let (documents, _version) =
+		load_documents_with_version(crate_name, crate_version_req, features)?;
 	Ok(documents)
 }
