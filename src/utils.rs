@@ -18,6 +18,16 @@ pub fn find_md_files<P: AsRef<Path>>(dir: P) -> Result<Vec<PathBuf>> {
 	Ok(md_files)
 }
 
+/// Generate deterministically the table/collection name in "sqlite" and "qdrant" for a
+/// given crate name and version
+pub fn gen_table_name(crate_name: &str, version: &str) -> String {
+	format!(
+		"{}_v{}",
+		crate_name.replace('-', "_"),
+		version.replace('.', "_")
+	)
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -80,5 +90,10 @@ mod tests {
 		}
 
 		Ok(())
+	}
+
+	#[test]
+	fn test_gen_table_name() {
+		assert_eq!(gen_table_name("my-crate", "1.0.0"), "my_crate_v1_0_0");
 	}
 }

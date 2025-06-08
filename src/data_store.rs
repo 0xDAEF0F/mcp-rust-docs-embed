@@ -1,4 +1,4 @@
-use crate::config::AppConfig;
+use crate::{config::AppConfig, utils::gen_table_name};
 use anyhow::Result;
 use qdrant_client::{
 	Payload, Qdrant,
@@ -24,7 +24,7 @@ impl DataStore {
 		let qdrant_client = Qdrant::from_url(&config.qdrant_url).build()?;
 
 		// Generate deterministic names
-		let collection_name = Self::generate_table_name(crate_name, version);
+		let collection_name = gen_table_name(crate_name, version);
 
 		// setup qdrant collection - only create if it doesn't exist
 		let collection_exists = qdrant_client.collection_exists(&collection_name).await?;
@@ -40,7 +40,7 @@ impl DataStore {
 		let sql_pool = SqlitePoolOptions::new().connect(&config.sqlite_url).await?;
 
 		// Create table if it doesn't exist
-		let table_name = Self::generate_table_name(crate_name, version);
+		let table_name = gen_table_name(crate_name, version);
 		let create_table_query = format!(
 			"CREATE TABLE IF NOT EXISTS {table_name} (
 				id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -59,7 +59,7 @@ impl DataStore {
 
 	/// Reset both the SQLite table and Qdrant collection
 	pub async fn reset(&self) -> Result<()> {
-		let table_name = Self::generate_table_name(&self.crate_name, &self.version);
+		let table_name = gen_table_name(&self.crate_name, &self.version);
 
 		// reset sqlite
 		let query = format!("DELETE FROM {table_name}");
@@ -83,7 +83,7 @@ impl DataStore {
 		content: &str,
 		vector: Vec<f32>,
 	) -> Result<u64> {
-		let table_name = Self::generate_table_name(&self.crate_name, &self.version);
+		let table_name = gen_table_name(&self.crate_name, &self.version);
 
 		let query = format!("INSERT INTO {table_name} (contents) VALUES (?1)");
 		let row_id = sqlx::query(&query)
@@ -106,7 +106,7 @@ impl DataStore {
 		query_vector: Vec<f32>,
 		max_results: u64,
 	) -> Result<Vec<(f32, String)>> {
-		let collection_name = Self::generate_table_name(&self.crate_name, &self.version);
+		let collection_name = gen_table_name(&self.crate_name, &self.version);
 		// search in qdrant
 		let search_req =
 			SearchPointsBuilder::new(&collection_name, query_vector, max_results);
@@ -142,19 +142,10 @@ impl DataStore {
 
 	/// Add embedding to Qdrant only (legacy method for compatibility)
 	pub async fn add_embedding(&self, id: u64, vector: Vec<f32>) -> Result<()> {
-		let collection_name = Self::generate_table_name(&self.crate_name, &self.version);
+		let collection_name = gen_table_name(&self.crate_name, &self.version);
 		let points = vec![PointStruct::new(id, vector, Payload::default())];
 		let req = UpsertPointsBuilder::new(&collection_name, points);
 		self.qdrant_client.upsert_points(req).await?;
 		Ok(())
-	}
-
-	/// Generate deterministic table/collection name from crate name and version
-	fn generate_table_name(crate_name: &str, version: &str) -> String {
-		format!(
-			"{}_v{}",
-			crate_name.replace('-', "_"),
-			version.replace('.', "_")
-		)
 	}
 }
