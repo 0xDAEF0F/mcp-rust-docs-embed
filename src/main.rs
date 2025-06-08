@@ -27,7 +27,7 @@ async fn main() -> Result<()> {
 			crate_name,
 			version,
 		} => {
-			EmbeddingService::embed_directory(&crate_name, &version).await?;
+			EmbeddingService::embed_crate(&crate_name, &version).await?;
 		}
 		Commands::Query {
 			query,

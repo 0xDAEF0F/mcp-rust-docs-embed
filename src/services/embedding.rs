@@ -1,20 +1,20 @@
 use crate::{data_store::DataStore, query_embedder::QueryEmbedder, utils::find_md_files};
 use anyhow::Result;
 use embed_anything::embed_file;
+use std::path::Path;
 use thin_logger::log;
 
 pub struct EmbeddingService;
 
 impl EmbeddingService {
-	pub async fn embed_directory(crate_name: &str, version: &str) -> Result<()> {
+	pub async fn embed_crate(crate_name: &str, version: &str) -> Result<()> {
 		let directory = format!("docs/{crate_name}/{version}");
 
-		if !std::path::Path::new(&directory).exists() {
-			anyhow::bail!(
-				"Documentation directory '{directory}' does not exist. Please run \
-				 'GenDocs' first to generate documentation."
-			);
-		}
+		anyhow::ensure!(
+			Path::new(&directory).exists(),
+			"Documentation directory '{directory}' does not exist. Please run 'GenDocs' \
+			 first to generate documentation."
+		);
 
 		log::info!("Starting embedding process for directory: {directory}");
 
