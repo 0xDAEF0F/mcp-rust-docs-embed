@@ -61,18 +61,15 @@ impl DataStore {
 	pub async fn reset(&self) -> Result<()> {
 		let table_name = gen_table_name(&self.crate_name, &self.version);
 
-		// reset sqlite
 		let query = format!("DELETE FROM {table_name}");
 		sqlx::query(&query).execute(&self.sql_pool).await?;
 
-		// reset qdrant (already done in try_new, but keeping for completeness)
-		_ = self.qdrant_client.delete_collection(&table_name).await;
+		self.qdrant_client.delete_collection(&table_name).await?;
 
 		let collection = CreateCollectionBuilder::new(&table_name)
 			.vectors_config(VectorParamsBuilder::new(1024, Distance::Cosine));
 
-		let res = self.qdrant_client.create_collection(collection).await?;
-		assert!(res.result, "collection could not be recreated");
+		_ = self.qdrant_client.create_collection(collection).await?;
 
 		Ok(())
 	}
