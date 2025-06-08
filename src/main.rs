@@ -4,7 +4,8 @@ use anyhow::Result;
 use clap::Parser as _;
 use embed_anything_rs::{
 	commands::{Cli, Commands},
-	services::{DocumentationService, EmbeddingService, QueryService},
+	query_embedder::QueryEmbedder,
+	services::{DocumentationService, QueryService},
 };
 
 #[tokio::main]
@@ -27,7 +28,8 @@ async fn main() -> Result<()> {
 			crate_name,
 			version,
 		} => {
-			EmbeddingService::embed_crate(&crate_name, &version).await?;
+			let embedder = QueryEmbedder::new()?;
+			embedder.embed_crate(&crate_name, &version).await?;
 		}
 		Commands::Query {
 			query,
