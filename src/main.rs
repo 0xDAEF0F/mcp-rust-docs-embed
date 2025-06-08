@@ -12,7 +12,7 @@ use htmd::{
 	HtmlToMarkdown,
 	options::{HeadingStyle, Options},
 };
-use thin_logger::log::{self, LevelFilter};
+use thin_logger::log::{self};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -23,6 +23,13 @@ async fn main() -> Result<()> {
 	let cli = Cli::parse();
 
 	match cli.command {
+		Commands::GenDocs {
+			crate_name,
+			features,
+			version,
+		} => {
+			gen_docs(&crate_name, &version, &features).await?;
+		}
 		Commands::Embed {
 			crate_name,
 			version,
@@ -36,13 +43,6 @@ async fn main() -> Result<()> {
 			limit,
 		} => {
 			query_embeddings(&query, &crate_name, &version, limit).await?;
-		}
-		Commands::GenDocs {
-			crate_name,
-			features,
-			version,
-		} => {
-			gen_docs(&crate_name, &version, &features).await?;
 		}
 	}
 

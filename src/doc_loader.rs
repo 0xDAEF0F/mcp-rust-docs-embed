@@ -356,13 +356,5 @@ edition = "2021"
 		}
 	}
 
-	eprintln!(
-		"Finished document loading. Found {} final documents.",
-		documents.len()
-	);
-	// eprintln!("documents: {:#?}", documents);
-	for doc in &documents {
-		eprintln!("doc: {:#?}", doc.path);
-	}
 	Ok(documents)
 }

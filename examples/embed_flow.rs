@@ -62,9 +62,7 @@ async fn main() -> Result<()> {
 
 	let q_vec = query[0].embedding.to_dense()?;
 
-	let results = data_store
-		.query_with_content(q_vec, 1)
-		.await?;
+	let results = data_store.query_with_content(q_vec, 1).await?;
 
 	assert!(results.len() == 1, "expected 1 result");
 
