@@ -1,6 +1,6 @@
 // use cargo::core::SourceId; // Removed unused import
 // use cargo::util::Filesystem; // Removed unused import
-use anyhow::Error as AnyhowError;
+use anyhow::{Result, Context};
 use cargo::{
 	core::{Workspace, resolver::features::CliFeatures},
 	ops::{self, CompileOptions, DocOptions, Packages},
@@ -15,23 +15,8 @@ use std::{
 }; // Added PathBuf, HashMap
 // use std::process::Command; // Remove Command again
 use tempfile::tempdir;
-use thiserror::Error;
 use walkdir::WalkDir;
 
-#[derive(Debug, Error)]
-pub enum DocLoaderError {
-	#[error("IO Error: {0}")]
-	Io(#[from] std::io::Error),
-	#[error("WalkDir Error: {0}")]
-	WalkDir(#[from] walkdir::Error),
-	#[error("CSS selector error: {0}")]
-	Selector(String),
-	#[error("Temporary directory creation failed: {0}")]
-	TempDirCreationFailed(std::io::Error),
-	#[error("Cargo library error: {0}")]
-	CargoLib(#[from] AnyhowError), /* Re-add CargoLib variant
-	                                * Removed unused StripPrefix variant */
-}
 
 // Simple struct to hold document content, maybe add path later if needed
 #[derive(Debug, Clone)]
@@ -48,10 +33,10 @@ pub fn load_documents(
 	crate_name: &str,
 	crate_version_req: &str,
 	features: Option<&Vec<String>>, // Add optional features parameter
-) -> Result<Vec<Document>, DocLoaderError> {
+) -> Result<Vec<Document>> {
 	let mut documents = Vec::new();
 
-	let temp_dir = tempdir().map_err(DocLoaderError::TempDirCreationFailed)?;
+	let temp_dir = tempdir().context("Failed to create temporary directory")?;
 	let temp_dir_path = temp_dir.path();
 	let temp_manifest_path = temp_dir_path.join("Cargo.toml");
 
@@ -130,7 +115,7 @@ edition = "2021"
 		output_format: ops::OutputFormat::Html,
 	};
 
-	ops::doc(&ws, &doc_opts).map_err(DocLoaderError::CargoLib)?; // Use ws
+	ops::doc(&ws, &doc_opts)?; // Use ws
 	// --- End Cargo API ---
 
 	// --- Find the actual documentation directory ---
@@ -160,19 +145,19 @@ edition = "2021"
 	let docs_path = match (found_count, target_docs_path) {
 		(1, Some(path)) => path,
 		(0, _) => {
-			return Err(DocLoaderError::CargoLib(anyhow::anyhow!(
+			anyhow::bail!(
 				"Could not find any subdirectory containing index.html within '{}'. \
 				 Cargo doc might have failed or produced unexpected output.",
 				base_doc_path.display()
-			)));
+			);
 		}
 		(count, _) => {
-			return Err(DocLoaderError::CargoLib(anyhow::anyhow!(
+			anyhow::bail!(
 				"Expected exactly one subdirectory containing index.html within '{}', \
 				 but found {}. Cannot determine the correct documentation path.",
 				base_doc_path.display(),
 				count
-			)));
+			);
 		}
 	};
 	// --- End finding documentation directory ---
@@ -182,7 +167,7 @@ edition = "2021"
 	// Define the CSS selector for the main content area in rustdoc HTML
 	// This might need adjustment based on the exact rustdoc version/theme
 	let content_selector = Selector::parse("section#main-content.content")
-		.map_err(|e| DocLoaderError::Selector(e.to_string()))?;
+		.map_err(|e| anyhow::anyhow!("Failed to parse CSS selector: {}", e))?;
 
 	// --- Collect all HTML file paths first ---
 	let all_html_paths: Vec<PathBuf> = WalkDir::new(&docs_path)

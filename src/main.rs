@@ -1,18 +1,10 @@
 use anyhow::Result;
 use clap::Parser as _;
-use embed_anything::embed_file;
 use embed_anything_rs::{
 	commands::{Cli, Commands},
-	data_store::DataStore,
-	doc_loader,
-	query_embedder::QueryEmbedder,
-	utils::find_md_files,
+	config::AppConfig,
+	services::{DocumentationService, EmbeddingService, QueryService},
 };
-use htmd::{
-	HtmlToMarkdown,
-	options::{HeadingStyle, Options},
-};
-use thin_logger::log::{self};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -20,6 +12,7 @@ async fn main() -> Result<()> {
 	dotenvy::dotenv_override().ok();
 	thin_logger::build(None).init();
 
+	let config = AppConfig::from_env()?;
 	let cli = Cli::parse();
 
 	match cli.command {
@@ -28,13 +21,19 @@ async fn main() -> Result<()> {
 			features,
 			version,
 		} => {
-			gen_docs(&crate_name, &version, &features).await?;
+			let doc_service = DocumentationService::new(config);
+			doc_service
+				.generate_docs(&crate_name, &version, &features)
+				.await?;
 		}
 		Commands::Embed {
 			crate_name,
 			version,
 		} => {
-			embed_directory(&crate_name, &version).await?;
+			let embedding_service = EmbeddingService::new(config);
+			embedding_service
+				.embed_directory(&crate_name, &version)
+				.await?;
 		}
 		Commands::Query {
 			query,
@@ -42,130 +41,12 @@ async fn main() -> Result<()> {
 			version,
 			limit,
 		} => {
-			query_embeddings(&query, &crate_name, &version, limit).await?;
-		}
-	}
-
-	Ok(())
-}
-
-async fn gen_docs(crate_name: &str, version: &str, features: &[String]) -> Result<()> {
-	log::info!("Generating documentation for crate: {crate_name} (version: {version})");
-
-	let features_vec = features.to_vec();
-	let features_option = if features_vec.is_empty() {
-		None
-	} else {
-		Some(&features_vec)
-	};
-
-	let documents = doc_loader::load_documents(crate_name, version, features_option)
-		.map_err(|e| anyhow::anyhow!("Failed to load documents: {}", e))?;
-
-	log::info!("Loaded {} documents", documents.len());
-
-	// Create HTML to markdown converter
-	let converter = HtmlToMarkdown::builder()
-		.skip_tags(vec!["script", "style", "meta", "head"])
-		.options(Options {
-			heading_style: HeadingStyle::Atx, // Use # for headings
-			..Default::default()
-		})
-		.build();
-
-	let docs_dir = format!("docs/{crate_name}/{version}");
-	std::fs::create_dir_all(&docs_dir)?;
-
-	for doc in documents {
-		let safe_path = doc.path.replace(['/', '\\'], "_");
-		let file_path = format!("{docs_dir}/{safe_path}.md");
-
-		// Convert HTML to markdown
-		let markdown_content = converter
-			.convert(&doc.html_content)
-			.map_err(|e| anyhow::anyhow!("Failed to convert HTML to markdown: {}", e))?;
-
-		std::fs::write(&file_path, &markdown_content)?;
-		log::info!("Saved documentation to: {file_path}");
-	}
-
-	log::info!("Documentation generation complete");
-	Ok(())
-}
-
-async fn embed_directory(crate_name: &str, version: &str) -> Result<()> {
-	let directory = format!("docs/{crate_name}/{version}");
-
-	if !std::path::Path::new(&directory).exists() {
-		eprintln!(
-			"Documentation directory '{directory}' does not exist. Please run 'GenDocs' \
-			 first to generate documentation."
-		);
-		std::process::exit(1);
-	}
-
-	log::info!("Starting embedding process for directory: {directory}");
-
-	let data_store = DataStore::try_new(crate_name, version).await?;
-
-	// reset both the sqlite db and the qdrant collection
-	data_store.reset().await?;
-
-	let query_embedder = QueryEmbedder::new()?;
-	let embedder = query_embedder.get_embedder();
-	let config = query_embedder.get_config();
-
-	let files_to_embed = find_md_files(directory)?;
-
-	log::info!("proceeding to embed {} files", files_to_embed.len());
-
-	for file in files_to_embed {
-		log::info!("embedding file: {file:?}");
-
-		for embedding in embed_file(file, &embedder, Some(config), None)
-			.await?
-			.expect("no data to embed?")
-		{
-			let contents = embedding.text.expect("expected text");
-			let vec_e = embedding.embedding.to_dense()?;
-
-			let row_id = data_store
-				.add_embedding_with_content(&contents, vec_e)
+			let query_service = QueryService::new(config);
+			let results = query_service
+				.query_embeddings(&query, &crate_name, &version, limit)
 				.await?;
-
-			log::trace!("added embedding with id: {row_id}");
+			QueryService::print_results(&results);
 		}
-	}
-
-	log::info!("finished embedding all files");
-	Ok(())
-}
-
-async fn query_embeddings(
-	query: &str,
-	crate_name: &str,
-	version: &str,
-	limit: u64,
-) -> Result<()> {
-	log::info!("querying for: {query}");
-
-	let data_store = DataStore::try_new(crate_name, version).await?;
-
-	let query_embedder = QueryEmbedder::new()?;
-	let q_vec = query_embedder.embed_query(query).await?;
-
-	let results = data_store.query_with_content(q_vec, limit).await?;
-
-	if results.is_empty() {
-		log::info!("no results found for query: {query}");
-		return Ok(());
-	}
-
-	log::info!("found {} results for query: {}", results.len(), query);
-
-	for (i, (score, content)) in results.iter().enumerate() {
-		println!("\n--- Result {} (score: {:.4}) ---", i + 1, score);
-		println!("{content}");
 	}
 
 	Ok(())

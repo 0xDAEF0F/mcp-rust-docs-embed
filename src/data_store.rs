@@ -1,3 +1,4 @@
+use crate::config::AppConfig;
 use anyhow::Result;
 use qdrant_client::{
 	Payload, Qdrant,
@@ -6,14 +7,7 @@ use qdrant_client::{
 		UpsertPointsBuilder, VectorParamsBuilder, point_id::PointIdOptions,
 	},
 };
-use serde::Deserialize;
 use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
-
-#[derive(Debug, Deserialize)]
-struct ConfigVars {
-	qdrant_url: String,
-	sqlite_url: String,
-}
 
 pub struct DataStore {
 	pub qdrant_client: Qdrant,
@@ -25,9 +19,9 @@ pub struct DataStore {
 impl DataStore {
 	/// Initialize a new data store with both Qdrant and SQLite connections
 	pub async fn try_new(crate_name: &str, version: &str) -> Result<Self> {
-		let config_vars = envy::from_env::<ConfigVars>()?;
+		let config = AppConfig::from_env()?;
 
-		let qdrant_client = Qdrant::from_url(&config_vars.qdrant_url).build()?;
+		let qdrant_client = Qdrant::from_url(&config.qdrant_url).build()?;
 
 		// Generate deterministic names
 		let collection_name = Self::generate_table_name(crate_name, version);
@@ -43,9 +37,7 @@ impl DataStore {
 		}
 
 		// setup sqlite connection
-		let sql_pool = SqlitePoolOptions::new()
-			.connect(&config_vars.sqlite_url)
-			.await?;
+		let sql_pool = SqlitePoolOptions::new().connect(&config.sqlite_url).await?;
 
 		// Create table if it doesn't exist
 		let table_name = Self::generate_table_name(crate_name, version);
