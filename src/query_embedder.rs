@@ -1,5 +1,5 @@
 use crate::{data_store::DataStore, utils::find_md_files};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use embed_anything::{
 	config::{SplittingStrategy, TextEmbedConfig},
 	embed_file, embed_query,
@@ -68,15 +68,14 @@ impl QueryEmbedder {
 		for file in files_to_embed {
 			log::info!("embedding file: {file:?}");
 
-			for embedding in embed_file(file, &self.embedder, Some(&self.config), None)
+			for embedding in embed_file(&file, &self.embedder, Some(&self.config), None)
 				.await?
-				.expect("no data to embed?")
+				.with_context(|| format!("no data to embed in file: {file:?}"))?
 			{
-				let contents = embedding.text.expect("expected text");
-				let vec_e = embedding.embedding.to_dense()?;
-
+				let contents = embedding.text.context("expected text")?;
+				let embedding = embedding.embedding.to_dense()?;
 				let row_id = data_store
-					.add_embedding_with_content(&contents, vec_e)
+					.add_embedding_with_content(&contents, embedding)
 					.await?;
 
 				log::trace!("added embedding with id: {row_id}");
