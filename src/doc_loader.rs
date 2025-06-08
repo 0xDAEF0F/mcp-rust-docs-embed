@@ -1,22 +1,8 @@
-// use cargo::core::SourceId; // Removed unused import
-// use cargo::util::Filesystem; // Removed unused import
-use anyhow::{Result, Context};
-use cargo::{
-	core::{Workspace, resolver::features::CliFeatures},
-	ops::{self, CompileOptions, DocOptions, Packages},
-	util::context::GlobalContext,
-};
+use crate::doc_generator::DocGenerator;
+use anyhow::Result;
 use scraper::{Html, Selector};
-use std::{
-	collections::HashMap,
-	fs::{self, File, create_dir_all},
-	io::Write,
-	path::PathBuf,
-}; // Added PathBuf, HashMap
-// use std::process::Command; // Remove Command again
-use tempfile::tempdir;
+use std::{collections::HashMap, fs, path::PathBuf};
 use walkdir::WalkDir;
-
 
 // Simple struct to hold document content, maybe add path later if needed
 #[derive(Debug, Clone)]
@@ -32,137 +18,16 @@ pub struct Document {
 pub fn load_documents(
 	crate_name: &str,
 	crate_version_req: &str,
-	features: Option<&Vec<String>>, // Add optional features parameter
+	features: Option<&Vec<String>>,
 ) -> Result<Vec<Document>> {
 	let mut documents = Vec::new();
 
-	let temp_dir = tempdir().context("Failed to create temporary directory")?;
-	let temp_dir_path = temp_dir.path();
-	let temp_manifest_path = temp_dir_path.join("Cargo.toml");
+	// Generate documentation using the new DocGenerator
+	let features_vec = features.cloned();
+	let doc_generator = DocGenerator::new(crate_name, crate_version_req, features_vec)?;
+	let docs_path = doc_generator.generate_docs()?;
 
-	// Create a temporary Cargo.toml using the version requirement and features
-	let features_string = features
-		.filter(|f| !f.is_empty()) // Only add features if provided and not empty
-		.map(|f| {
-			let feature_list = f
-				.iter()
-				.map(|feat| format!("\"{feat}\""))
-				.collect::<Vec<_>>()
-				.join(", ");
-			format!(", features = [{feature_list}]")
-		})
-		.unwrap_or_default(); // Use empty string if no features
-
-	let cargo_toml_content = format!(
-		r#"[package]
-name = "temp-doc-crate"
-version = "0.1.0"
-edition = "2021"
-
-[lib] # Add an empty lib target to satisfy Cargo
-
-[dependencies]
-{crate_name} = {{ version = "{crate_version_req}"{features_string} }}
-"# /* Use the version requirement string and features string here */
-	);
-
-	// Create the src directory and an empty lib.rs file
-	let src_path = temp_dir_path.join("src");
-	create_dir_all(&src_path)?;
-	File::create(src_path.join("lib.rs"))?;
-
-	let mut temp_manifest_file = File::create(&temp_manifest_path)?;
-	temp_manifest_file.write_all(cargo_toml_content.as_bytes())?;
-
-	// --- Use Cargo API ---
-	let mut config = GlobalContext::default()?; // Make mutable
-	// Configure context (set quiet to false for more detailed errors)
-	config.configure(
-		0,     // verbose
-		true,  // quiet
-		None,  // color
-		false, // frozen
-		false, // locked
-		false, // offline
-		&None, // target_dir (Using ws.set_target_dir instead)
-		&[],   // unstable_flags
-		&[],   // cli_config
-	)?;
-	// config.shell().set_verbosity(Verbosity::Quiet); // Keep commented
-
-	// Use the temporary manifest path for the Workspace
-	let mut ws = Workspace::new(&temp_manifest_path, &config)?; // Make ws mutable
-	// Set target_dir directly on Workspace
-	ws.set_target_dir(cargo::util::Filesystem::new(temp_dir_path.to_path_buf()));
-
-	// Create CompileOptions, relying on ::new for BuildConfig
-	let mut compile_opts = CompileOptions::new(
-		&config,
-		cargo::core::compiler::CompileMode::Doc {
-			deps: false,
-			json: false,
-		},
-	)?;
-	// Specify the package explicitly
-	let package_spec = crate_name.to_string(); // Just use name (with underscores)
-	compile_opts.cli_features = CliFeatures::new_all(false); // Use new_all(false) - applies to the temp crate, not dependency
-	compile_opts.spec = Packages::Packages(vec![package_spec.clone()]); // Clone spec
-
-	// Create DocOptions: Pass compile options
-	let doc_opts = DocOptions {
-		compile_opts,
-		open_result: false, // Don't open in browser
-		output_format: ops::OutputFormat::Html,
-	};
-
-	ops::doc(&ws, &doc_opts)?; // Use ws
-	// --- End Cargo API ---
-
-	// --- Find the actual documentation directory ---
-	// Iterate through subdirectories in `target/doc` and find the one containing
-	// `index.html`.
-	let base_doc_path = temp_dir_path.join("doc");
-
-	let mut target_docs_path: Option<PathBuf> = None;
-	let mut found_count = 0;
-
-	if base_doc_path.is_dir() {
-		for entry_result in fs::read_dir(&base_doc_path)? {
-			let entry = entry_result?;
-			if entry.file_type()?.is_dir() {
-				let dir_path = entry.path();
-				let index_html_path = dir_path.join("index.html");
-				if index_html_path.is_file() {
-					if target_docs_path.is_none() {
-						target_docs_path = Some(dir_path);
-					}
-					found_count += 1;
-				}
-			}
-		}
-	}
-
-	let docs_path = match (found_count, target_docs_path) {
-		(1, Some(path)) => path,
-		(0, _) => {
-			anyhow::bail!(
-				"Could not find any subdirectory containing index.html within '{}'. \
-				 Cargo doc might have failed or produced unexpected output.",
-				base_doc_path.display()
-			);
-		}
-		(count, _) => {
-			anyhow::bail!(
-				"Expected exactly one subdirectory containing index.html within '{}', \
-				 but found {}. Cannot determine the correct documentation path.",
-				base_doc_path.display(),
-				count
-			);
-		}
-	};
-	// --- End finding documentation directory ---
-
-	eprintln!("Using documentation path: {}", docs_path.display()); // Log the path we are actually using
+	eprintln!("Using documentation path: {}", docs_path.display());
 
 	// Define the CSS selector for the main content area in rustdoc HTML
 	// This might need adjustment based on the exact rustdoc version/theme

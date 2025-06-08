@@ -1,3 +1,5 @@
+#![allow(clippy::uninlined_format_args)]
+
 use anyhow::Result;
 use clap::Parser as _;
 use embed_anything_rs::{
