@@ -1,12 +1,12 @@
 /target
 
-.cursor
-.env
 test.db
 .sqlx
 script.sql
 src.bak
 docs
+
 .cursor
 .claude
 .env
+
