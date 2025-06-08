@@ -87,9 +87,7 @@ fn extract_version_from_docs(docs_path: &Path, crate_name: &str) -> Result<Strin
 		}
 	}
 
-	Err(anyhow::anyhow!(
-		"Could not extract version from generated documentation"
-	))
+	anyhow::bail!("could not extract version from generated documentation");
 }
 
 fn load_documents_internal(
