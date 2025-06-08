@@ -12,11 +12,12 @@ use htmd::{
 	HtmlToMarkdown,
 	options::{HeadingStyle, Options},
 };
-use thin_logger::log;
+use thin_logger::log::{self, LevelFilter};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-	dotenvy::dotenv().ok();
+	// dotenvy::dotenv().ok(); // use this for production
+	dotenvy::dotenv_override().ok();
 	thin_logger::build(None).init();
 
 	let cli = Cli::parse();
