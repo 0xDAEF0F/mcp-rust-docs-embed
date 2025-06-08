@@ -104,14 +104,13 @@ impl DataStore {
 		max_results: u64,
 	) -> Result<Vec<(f32, String)>> {
 		let collection_name = gen_table_name(&self.crate_name, &self.version);
-		// search in qdrant
+
 		let search_req =
 			SearchPointsBuilder::new(&collection_name, query_vector, max_results);
 		let search_res = self.qdrant_client.search_points(search_req).await?;
 
 		let mut results = Vec::new();
 
-		// get corresponding text content from sqlite
 		for result in search_res.result {
 			let score = result.score;
 
@@ -135,14 +134,5 @@ impl DataStore {
 		}
 
 		Ok(results)
-	}
-
-	/// Add embedding to Qdrant only (legacy method for compatibility)
-	pub async fn add_embedding(&self, id: u64, vector: Vec<f32>) -> Result<()> {
-		let collection_name = gen_table_name(&self.crate_name, &self.version);
-		let points = vec![PointStruct::new(id, vector, Payload::default())];
-		let req = UpsertPointsBuilder::new(&collection_name, points);
-		self.qdrant_client.upsert_points(req).await?;
-		Ok(())
 	}
 }
