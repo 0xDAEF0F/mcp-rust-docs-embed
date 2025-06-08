@@ -18,11 +18,11 @@ pub enum Commands {
 	},
 	/// Query for similar embeddings
 	Query {
-		/// Query string to search for
-		query: String,
 		/// Crate name to query for
-		#[arg(long, short)]
 		crate_name: String,
+		/// Query string to search for
+		#[arg(long, short)]
+		query: String,
 		/// Crate version
 		#[arg(long, short)]
 		version: String,
