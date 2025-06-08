@@ -1,5 +1,5 @@
 use crate::{config::AppConfig, doc_loader};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use htmd::{
 	HtmlToMarkdown,
 	options::{HeadingStyle, Options},
@@ -22,7 +22,9 @@ impl DocumentationService {
 		features: &[String],
 	) -> Result<()> {
 		log::info!(
-			"Generating documentation for crate: {crate_name} (version: {version})"
+			"Generating documentation for crate: {crate_name} (version: {version}) with \
+			 features: [{}]",
+			features.join(", ")
 		);
 
 		let features_vec = features.to_vec();
@@ -35,10 +37,10 @@ impl DocumentationService {
 		// Generate docs and get both the documents and resolved version
 		let (documents, resolved_version) = if version == "*" {
 			doc_loader::load_documents_with_version(crate_name, version, features_option)
-				.map_err(|e| anyhow::anyhow!("Failed to load documents: {}", e))?
+				.context("Failed to load documents")?
 		} else {
 			let docs = doc_loader::load_documents(crate_name, version, features_option)
-				.map_err(|e| anyhow::anyhow!("Failed to load documents: {}", e))?;
+				.context("Failed to load documents")?;
 			(docs, version.to_string())
 		};
 
@@ -61,9 +63,9 @@ impl DocumentationService {
 			let safe_path = doc.path.replace(['/', '\\'], "_");
 			let file_path = format!("{docs_dir}/{safe_path}.md");
 
-			let markdown_content = converter.convert(&doc.html_content).map_err(|e| {
-				anyhow::anyhow!("Failed to convert HTML to markdown: {}", e)
-			})?;
+			let markdown_content = converter
+				.convert(&doc.html_content)
+				.context("Failed to convert HTML to markdown")?;
 
 			std::fs::write(&file_path, &markdown_content)?;
 			log::info!("Saved documentation to: {file_path}");
