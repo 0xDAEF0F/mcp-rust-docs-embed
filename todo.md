@@ -1,3 +1,4 @@
 # TODO
 
-- build the mcp server
+1. db sqlite
+2. qdrant db

@@ -1651,6 +1651,7 @@ dependencies = [
  "thin-logger",
  "thiserror 2.0.12",
  "tokio",
+ "tokio-util",
  "tracing",
  "tracing-subscriber",
  "uuid",

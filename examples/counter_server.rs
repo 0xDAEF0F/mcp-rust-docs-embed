@@ -1,11 +1,16 @@
 use anyhow::Result;
 use rmcp::{
-	Error as McpError, RoleServer, ServerHandler, ServiceExt, const_string, model::*,
-	schemars, service::RequestContext, tool, transport::stdio,
+	Error as McpError, RoleServer, ServerHandler, const_string,
+	model::*,
+	schemars,
+	service::RequestContext,
+	tool,
+	transport::sse_server::{SseServer, SseServerConfig},
 };
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 use tracing_subscriber::{self, EnvFilter};
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -238,13 +243,40 @@ async fn main() -> Result<()> {
 		.with_ansi(false)
 		.init();
 
-	tracing::info!("Starting MCP server");
+	tracing::info!("Starting MCP SSE server");
 
-	let service = Counter::new().serve(stdio()).await.inspect_err(|e| {
-		tracing::error!("serving error: {:?}", e);
-	})?;
+	let config = SseServerConfig {
+		bind: "127.0.0.1:8000".parse()?,
+		sse_path: "/sse".to_string(),
+		post_path: "/message".to_string(),
+		ct: CancellationToken::new(),
+		sse_keep_alive: None,
+	};
 
-	service.waiting().await?;
+	let (sse_server, router) = SseServer::new(config);
 
+	let listener = tokio::net::TcpListener::bind(sse_server.config.bind).await?;
+	let server_address = sse_server.config.bind;
+
+	let ct = sse_server.config.ct.child_token();
+
+	let server = axum::serve(listener, router).with_graceful_shutdown(async move {
+		ct.cancelled().await;
+		tracing::info!("sse server cancelled");
+	});
+
+	tokio::spawn(async move {
+		if let Err(e) = server.await {
+			tracing::error!(error = %e, "sse server shutdown with error");
+		}
+	});
+
+	let ct = sse_server.with_service(Counter::new);
+
+	tracing::info!("Server running at http://{}/sse", server_address);
+
+	tokio::signal::ctrl_c().await?;
+	ct.cancel();
+	
 	Ok(())
 }
