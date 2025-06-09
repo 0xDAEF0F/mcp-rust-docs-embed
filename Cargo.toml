@@ -47,7 +47,3 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "std", "fmt"] 
 futures = "0.3"
 axum = { version = "0.8", features = ["macros"] }
 tokio-util = "0.7.15"
-
-[[example]]
-name = "counter_server"
-path = "examples/counter_server.rs"
