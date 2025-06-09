@@ -34,3 +34,19 @@ thiserror = "2.0.12"
 htmd = "0.1"
 iter_tools = "0.29.0"
 envy = "0.4.2"
+rmcp = { git = "https://github.com/modelcontextprotocol/rust-sdk", branch = "main", features = [
+    "server",
+    "transport-sse-server",
+    "transport-io",
+    "transport-streamable-http-server",
+    "auth",
+] }
+schemars = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "std", "fmt"] }
+futures = "0.3"
+axum = { version = "0.8", features = ["macros"] }
+
+[[example]]
+name = "counter_server"
+path = "examples/counter_server.rs"
