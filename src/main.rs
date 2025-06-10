@@ -1,4 +1,5 @@
 use anyhow::Result;
+use embed_anything_rs::services;
 use rmcp::{
 	Error as McpError, RoleServer, ServerHandler,
 	model::*,
@@ -18,6 +19,22 @@ pub struct StructRequest {
 	pub b: i32,
 }
 
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct GenDocsRequest {
+	#[schemars(description = "Crate name to generate docs for")]
+	pub crate_name: String,
+	#[serde(default = "default_version")]
+	#[schemars(description = "Crate version requirement (defaults to *)")]
+	pub version: String,
+	#[serde(default)]
+	#[schemars(description = "Optional features to enable")]
+	pub features: Vec<String>,
+}
+
+fn default_version() -> String {
+	"*".to_string()
+}
+
 #[derive(Clone)]
 pub struct Counter {
 	counter: Arc<Mutex<i32>>,
@@ -25,10 +42,33 @@ pub struct Counter {
 
 #[tool(tool_box)]
 impl Counter {
-	#[allow(dead_code)]
 	pub fn new() -> Self {
 		Self {
 			counter: Arc::new(Mutex::new(0)),
+		}
+	}
+
+	#[tool(description = "Generate documentation for the given crate")]
+	async fn generate_docs(
+		&self,
+		#[tool(aggr)] req: GenDocsRequest,
+	) -> Result<CallToolResult, McpError> {
+		let version = if req.version.is_empty() {
+			"*".to_string()
+		} else {
+			req.version
+		};
+
+		match services::DocumentationService::generate_docs(
+			&req.crate_name,
+			&version,
+			&req.features,
+		) {
+			Ok(_) => Ok(CallToolResult::success(vec![Content::text(format!(
+				"Successfully generated documentation for {} v{}",
+				req.crate_name, version
+			))])),
+			Err(_) => Err(McpError::internal_error("internal error. try again", None)),
 		}
 	}
 
@@ -41,26 +81,12 @@ impl Counter {
 		)]))
 	}
 
-	#[tool(description = "Decrement the counter by 1")]
-	async fn decrement(&self) -> Result<CallToolResult, McpError> {
-		let mut counter = self.counter.lock().await;
-		*counter -= 1;
-		Ok(CallToolResult::success(vec![Content::text(
-			counter.to_string(),
-		)]))
-	}
-
 	#[tool(description = "Get the current counter value")]
 	async fn get_value(&self) -> Result<CallToolResult, McpError> {
 		let counter = self.counter.lock().await;
 		Ok(CallToolResult::success(vec![Content::text(
 			counter.to_string(),
 		)]))
-	}
-
-	#[tool(description = "Say hello to the client")]
-	fn say_hello(&self) -> Result<CallToolResult, McpError> {
-		Ok(CallToolResult::success(vec![Content::text("hello")]))
 	}
 
 	#[tool(description = "Repeat what you say")]

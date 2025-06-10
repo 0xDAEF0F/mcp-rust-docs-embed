@@ -9,7 +9,7 @@ use thin_logger::log;
 pub struct DocumentationService;
 
 impl DocumentationService {
-	pub async fn generate_docs(
+	pub fn generate_docs(
 		crate_name: &str,
 		version: &str,
 		features: &[String],

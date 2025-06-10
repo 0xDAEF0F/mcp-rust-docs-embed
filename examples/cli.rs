@@ -22,7 +22,7 @@ async fn main() -> Result<()> {
 			features,
 			version,
 		} => {
-			DocumentationService::generate_docs(&crate_name, &version, &features).await?;
+			DocumentationService::generate_docs(&crate_name, &version, &features)?;
 		}
 		Commands::Embed {
 			crate_name,
