@@ -1,5 +1,6 @@
 #![allow(clippy::uninlined_format_args)]
 
+pub mod backend;
 pub mod commands;
 pub mod config;
 pub mod data_store;
