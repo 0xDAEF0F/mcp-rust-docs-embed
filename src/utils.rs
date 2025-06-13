@@ -28,6 +28,33 @@ pub fn gen_table_name(crate_name: &str, version: &str) -> String {
 	)
 }
 
+/// Resolves the latest version of a Rust crate from crates.io
+pub async fn resolve_latest_crate_version(crate_name: &str) -> Result<String> {
+	let url = format!("https://crates.io/api/v1/crates/{}", crate_name);
+	let client = reqwest::Client::new();
+
+	let response = client
+		.get(&url)
+		.header("User-Agent", "embed-anything-rs")
+		.send()
+		.await?;
+
+	if !response.status().is_success() {
+		anyhow::bail!("Failed to fetch crate info: {}", response.status());
+	}
+
+	let json: serde_json::Value = response.json().await?;
+
+	let version = json["crate"]["max_stable_version"]
+		.as_str()
+		.or_else(|| json["crate"]["max_version"].as_str())
+		.ok_or_else(|| {
+			anyhow::anyhow!("Could not find version for crate: {}", crate_name)
+		})?;
+
+	Ok(version.to_string())
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -95,5 +122,42 @@ mod tests {
 	#[test]
 	fn test_gen_table_name() {
 		assert_eq!(gen_table_name("my-crate", "1.0.0"), "my_crate_v1_0_0");
+	}
+
+	#[tokio::test]
+	async fn test_resolve_latest_crate_version() -> Result<()> {
+		// test with anyhow crate
+		let version = resolve_latest_crate_version("anyhow").await?;
+
+		// verify it's a valid version format
+		let parts: Vec<&str> = version.split('.').collect();
+		assert_eq!(
+			parts.len(),
+			3,
+			"Version should have 3 parts (major.minor.patch)"
+		);
+
+		// verify each part is a number
+		for part in parts {
+			part.parse::<u32>()
+				.expect("Each version part should be a valid number");
+		}
+
+		// verify it matches known version format (e.g., 1.0.98)
+		assert!(
+			version.starts_with("1."),
+			"anyhow version should start with 1."
+		);
+
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn test_resolve_latest_crate_version_nonexistent() {
+		// test with non-existent crate
+		let result =
+			resolve_latest_crate_version("this-crate-definitely-does-not-exist-12345")
+				.await;
+		assert!(result.is_err(), "Should fail for non-existent crate");
 	}
 }
