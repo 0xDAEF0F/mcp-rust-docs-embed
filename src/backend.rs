@@ -1,6 +1,4 @@
 use crate::{
-	config::AppConfig,
-	query_embedder::QueryEmbedder,
 	services::{DocumentationService, query::QueryService},
 	utils::{gen_table_name, resolve_latest_crate_version},
 };
@@ -85,7 +83,6 @@ pub enum EmbedStatus {
 pub struct Backend {
 	embed_operations: Arc<RwLock<HashMap<String, EmbedOperation>>>,
 	cancellation_token: CancellationToken,
-	app_config: AppConfig,
 }
 
 impl Default for Backend {
@@ -93,8 +90,6 @@ impl Default for Backend {
 		Self {
 			embed_operations: Arc::new(RwLock::new(HashMap::new())),
 			cancellation_token: CancellationToken::new(),
-			// todo: handle this error better
-			app_config: envy::from_env().expect("expected to have all env variables"),
 		}
 	}
 }
@@ -121,9 +116,9 @@ impl Backend {
 			// resolve the latest version from crates.io
 			match resolve_latest_crate_version(&req.crate_name).await {
 				Ok(v) => v,
-				Err(e) => {
+				Err(_) => {
 					return Err(McpError::invalid_request(
-						format!("Failed to resolve latest version: {}", e),
+						"Could not resolve the latest crate version",
 						None,
 					));
 				}
@@ -134,9 +129,10 @@ impl Backend {
 
 		// check if this version is already embedded
 		let table_name = gen_table_name(&req.crate_name, &version);
-		if let Ok(config) = envy::from_env::<crate::config::AppConfig>()
+
+		if let Ok(qdrant_url) = dotenvy::var("QDRANT_URL")
 			&& let Ok(qdrant_client) =
-				qdrant_client::Qdrant::from_url(&config.qdrant_url).build()
+				qdrant_client::Qdrant::from_url(&qdrant_url).build()
 			&& let Ok(exists) = qdrant_client.collection_exists(&table_name).await
 			&& exists
 		{
@@ -177,11 +173,8 @@ impl Backend {
 						&[],  // todo: support features in EmbedRequest
 					)?;
 
-					let config = envy::from_env::<AppConfig>().expect("no openai key");
-					let embedder = QueryEmbedder::new(config.openai_api_key)?;
-
-
-					embedder.embed_crate(&crate_name, &version_clone).await
+					let query_service = QueryService::new()?;
+					query_service.embed_crate(&crate_name, &version_clone).await
 				} => res
 			};
 
@@ -220,11 +213,8 @@ impl Backend {
 			// resolve the latest version from crates.io
 			match resolve_latest_crate_version(&req.crate_name).await {
 				Ok(v) => v,
-				Err(e) => {
-					return Err(McpError::invalid_request(
-						format!("Failed to resolve latest version: {}", e),
-						None,
-					));
+				Err(_) => {
+					return Err(McpError::internal_error("Internal server error", None));
 				}
 			}
 		} else {
@@ -233,9 +223,9 @@ impl Backend {
 
 		// check if embeddings exist for this crate/version
 		let table_name = gen_table_name(&req.crate_name, &version);
-		if let Ok(config) = envy::from_env::<crate::config::AppConfig>()
+		if let Ok(qdrant_url) = dotenvy::var("QDRANT_URL")
 			&& let Ok(qdrant_client) =
-				qdrant_client::Qdrant::from_url(&config.qdrant_url).build()
+				qdrant_client::Qdrant::from_url(&qdrant_url).build()
 		{
 			match qdrant_client.collection_exists(&table_name).await {
 				Ok(exists) => {
@@ -256,13 +246,16 @@ impl Backend {
 			}
 		}
 
-		match QueryService::query_embeddings(
-			&req.query,
-			&req.crate_name,
-			&version,
-			req.limit,
-		)
-		.await
+		let query_service = match QueryService::new() {
+			Ok(qs) => qs,
+			Err(_) => {
+				return Err(McpError::internal_error("Internal server error", None));
+			}
+		};
+
+		match query_service
+			.query_embeddings(&req.query, &req.crate_name, &version, req.limit)
+			.await
 		{
 			Ok(results) => {
 				if results.is_empty() {
@@ -289,10 +282,7 @@ impl Backend {
 					Ok(CallToolResult::success(contents))
 				}
 			}
-			Err(e) => Err(McpError::internal_error(
-				format!("Query failed: {}", e),
-				None,
-			)),
+			Err(_) => Err(McpError::internal_error("Internal server error", None)),
 		}
 	}
 

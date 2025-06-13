@@ -1,8 +1,5 @@
-use crate::{
-	config::{AppConfig, EmbeddingConfig},
-	utils::gen_table_name,
-};
-use anyhow::Result;
+use crate::{config::EmbeddingConfig, utils::gen_table_name};
+use anyhow::{Context, Result};
 use qdrant_client::{
 	Payload, Qdrant,
 	qdrant::{
@@ -21,9 +18,9 @@ pub struct DataStore {
 impl DataStore {
 	/// Initialize a new data store with Qdrant
 	pub async fn try_new(crate_name: &str, version: &str) -> Result<Self> {
-		let config = envy::from_env::<AppConfig>()?;
+		let qdrant_url = dotenvy::var("QDRANT_URL").context("QDRANT_URL not set")?;
 
-		let qdrant_client = Qdrant::from_url(&config.qdrant_url).build()?;
+		let qdrant_client = Qdrant::from_url(&qdrant_url).build()?;
 
 		// Generate deterministic names
 		let collection_name = gen_table_name(crate_name, version);
