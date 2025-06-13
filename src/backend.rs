@@ -1,6 +1,7 @@
 use crate::{
 	query_embedder::QueryEmbedder,
 	services::{DocumentationService, query::QueryService},
+	utils::{gen_table_name, resolve_latest_crate_version},
 };
 use anyhow::Result;
 use rmcp::{
@@ -103,77 +104,7 @@ impl Backend {
 		}
 	}
 
-	/// Resolves "*" version to the actual version by looking at the docs directory
-	fn resolve_version(crate_name: &str, version: &str) -> Result<String> {
-		if version != "*" {
-			return Ok(version.to_string());
-		}
-
-		let docs_path = format!("docs/{}", crate_name);
-		let entries = std::fs::read_dir(&docs_path).map_err(|e| {
-			anyhow::anyhow!(
-				"Failed to read docs directory for {}: {}. Please run generate_docs \
-				 first.",
-				crate_name,
-				e
-			)
-		})?;
-
-		let mut versions: Vec<String> = entries
-			.filter_map(|entry| entry.ok())
-			.filter_map(|entry| {
-				let path = entry.path();
-				if path.is_dir() {
-					path.file_name()
-						.and_then(|n| n.to_str())
-						.map(|s| s.to_string())
-				} else {
-					None
-				}
-			})
-			.collect();
-
-		if versions.is_empty() {
-			return Err(anyhow::anyhow!(
-				"No version directories found in docs/{}. Please run generate_docs \
-				 first.",
-				crate_name
-			));
-		}
-
-		// Sort versions and take the latest (simple string sort for now)
-		versions.sort();
-		Ok(versions.pop().unwrap())
-	}
-
-	#[tool(description = "Generate documentation for the given crate")]
-	async fn generate_docs(
-		&self,
-		#[tool(aggr)] req: GenDocsRequest,
-	) -> Result<CallToolResult, McpError> {
-		let version = if req.version.is_empty() {
-			"*".to_string()
-		} else {
-			req.version.clone()
-		};
-
-		match DocumentationService::generate_docs(
-			&req.crate_name,
-			&version,
-			&req.features,
-		) {
-			Ok(_) => Ok(CallToolResult::success(vec![Content::text(format!(
-				"Successfully generated documentation for {} v{}",
-				req.crate_name, version
-			))])),
-			Err(e) => Err(McpError::internal_error(
-				format!("Failed to generate docs: {}", e),
-				None,
-			)),
-		}
-	}
-
-	#[tool(description = "Embed documentation for the given crate")]
+	#[tool(description = "Generate and embed documentation for the given crate")]
 	async fn embed_docs(
 		&self,
 		#[tool(aggr)] req: EmbedRequest,
@@ -182,11 +113,34 @@ impl Backend {
 		let ops = self.embed_operations.clone();
 		let ct = self.cancellation_token.child_token();
 
-		let version = if req.version.is_empty() {
-			"*".to_string()
+		let version = if req.version.is_empty() || req.version == "*" {
+			// resolve the latest version from crates.io
+			match resolve_latest_crate_version(&req.crate_name).await {
+				Ok(v) => v,
+				Err(e) => {
+					return Err(McpError::invalid_request(
+						format!("Failed to resolve latest version: {}", e),
+						None,
+					));
+				}
+			}
 		} else {
 			req.version.clone()
 		};
+
+		// check if this version is already embedded
+		let table_name = gen_table_name(&req.crate_name, &version);
+		if let Ok(config) = envy::from_env::<crate::config::AppConfig>()
+			&& let Ok(qdrant_client) =
+				qdrant_client::Qdrant::from_url(&config.qdrant_url).build()
+			&& let Ok(exists) = qdrant_client.collection_exists(&table_name).await
+			&& exists
+		{
+			return Ok(CallToolResult::success(vec![Content::text(format!(
+				"Documentation for {} v{} is already embedded",
+				req.crate_name, version
+			))]));
+		}
 
 		{
 			let mut ops_lock = ops.write().await;
@@ -196,7 +150,8 @@ impl Backend {
 					status: EmbedStatus::InProgress,
 					crate_name: req.crate_name.clone(),
 					version: version.clone(),
-					message: "Starting embedding process".to_string(),
+					message: "Starting documentation generation and embedding process"
+						.to_string(),
 				},
 			);
 		}
@@ -211,20 +166,17 @@ impl Backend {
 					Err(anyhow::anyhow!("Operation cancelled"))
 				}
 				res = async {
-					let actual_version = Self::resolve_version(&crate_name, &version_clone)?;
+					// generate documentation first
+					DocumentationService::generate_docs(
+						&crate_name,
+						&version_clone,
+						&[],  // todo: support features in EmbedRequest
+					)?;
 
 					let embedder = QueryEmbedder::new()?;
-					let result = embedder.embed_crate(&crate_name, &actual_version).await;
 
-					// Update the operation with the actual version if it was resolved
-					if version_clone == "*" {
-						let mut ops_lock = ops.write().await;
-						if let Some(op) = ops_lock.get_mut(&op_id_clone) {
-							op.version = actual_version.clone();
-						}
-					}
 
-					result
+					embedder.embed_crate(&crate_name, &version_clone).await
 				} => res
 			};
 
@@ -234,7 +186,8 @@ impl Backend {
 					Ok(_) => {
 						op.status = EmbedStatus::Completed;
 						op.message = format!(
-							"Successfully embedded documentation for {} v{}",
+							"Successfully generated and embedded documentation for {} \
+							 v{}",
 							op.crate_name, op.version
 						);
 					}
@@ -247,8 +200,8 @@ impl Backend {
 		});
 
 		Ok(CallToolResult::success(vec![Content::text(format!(
-			"Started embedding process with ID: {}. Use check_embed_status to monitor \
-			 progress.",
+			"Started documentation generation and embedding process with ID: {}. Use \
+			 check_embed_status to monitor progress.",
 			operation_id
 		))]))
 	}
@@ -258,23 +211,50 @@ impl Backend {
 		&self,
 		#[tool(aggr)] req: QueryRequest,
 	) -> Result<CallToolResult, McpError> {
-		let version = if req.version.is_empty() {
-			"*".to_string()
+		let version = if req.version.is_empty() || req.version == "*" {
+			// resolve the latest version from crates.io
+			match resolve_latest_crate_version(&req.crate_name).await {
+				Ok(v) => v,
+				Err(e) => {
+					return Err(McpError::invalid_request(
+						format!("Failed to resolve latest version: {}", e),
+						None,
+					));
+				}
+			}
 		} else {
 			req.version
 		};
 
-		let actual_version = match Self::resolve_version(&req.crate_name, &version) {
-			Ok(v) => v,
-			Err(e) => {
-				return Err(McpError::invalid_request(format!("{}", e), None));
+		// check if embeddings exist for this crate/version
+		let table_name = gen_table_name(&req.crate_name, &version);
+		if let Ok(config) = envy::from_env::<crate::config::AppConfig>()
+			&& let Ok(qdrant_client) =
+				qdrant_client::Qdrant::from_url(&config.qdrant_url).build()
+		{
+			match qdrant_client.collection_exists(&table_name).await {
+				Ok(exists) => {
+					if !exists {
+						return Ok(CallToolResult::success(vec![Content::text(
+							format!(
+								"No embedded documentation found for {} v{}. Please run \
+								 embed_docs first to generate and embed the \
+								 documentation.",
+								req.crate_name, version
+							),
+						)]));
+					}
+				}
+				Err(_) => {
+					// if we can't check, proceed with query anyway
+				}
 			}
-		};
+		}
 
 		match QueryService::query_embeddings(
 			&req.query,
 			&req.crate_name,
-			&actual_version,
+			&version,
 			req.limit,
 		)
 		.await
@@ -316,9 +296,13 @@ impl Backend {
 		&self,
 		#[tool(aggr)] req: StatusRequest,
 	) -> Result<CallToolResult, McpError> {
-		let ops_lock = self.embed_operations.read().await;
+		// Clone the operation data to avoid holding the lock
+		let op_data = {
+			let ops_lock = self.embed_operations.read().await;
+			ops_lock.get(&req.operation_id).cloned()
+		};
 
-		if let Some(op) = ops_lock.get(&req.operation_id) {
+		if let Some(op) = op_data {
 			let status_text = match &op.status {
 				EmbedStatus::InProgress => "in_progress",
 				EmbedStatus::Completed => "completed",
@@ -339,19 +323,23 @@ impl Backend {
 
 	#[tool(description = "List all embedding operations and their status")]
 	async fn list_embed_operations(&self) -> Result<CallToolResult, McpError> {
-		let ops_lock = self.embed_operations.read().await;
+		// Clone all operations to avoid holding the lock
+		let operations = {
+			let ops_lock = self.embed_operations.read().await;
+			ops_lock.clone()
+		};
 
-		if ops_lock.is_empty() {
+		if operations.is_empty() {
 			Ok(CallToolResult::success(vec![Content::text(
 				"No embedding operations found".to_string(),
 			)]))
 		} else {
 			let mut contents = vec![Content::text(format!(
 				"Found {} embedding operations:",
-				ops_lock.len()
+				operations.len()
 			))];
 
-			for (id, op) in ops_lock.iter() {
+			for (id, op) in operations.iter() {
 				let status_text = match &op.status {
 					EmbedStatus::InProgress => "in_progress",
 					EmbedStatus::Completed => "completed",
