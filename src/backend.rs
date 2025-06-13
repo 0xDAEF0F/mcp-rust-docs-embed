@@ -1,4 +1,5 @@
 use crate::{
+	config::AppConfig,
 	query_embedder::QueryEmbedder,
 	services::{DocumentationService, query::QueryService},
 	utils::{gen_table_name, resolve_latest_crate_version},
@@ -84,6 +85,7 @@ pub enum EmbedStatus {
 pub struct Backend {
 	embed_operations: Arc<RwLock<HashMap<String, EmbedOperation>>>,
 	cancellation_token: CancellationToken,
+	app_config: AppConfig,
 }
 
 impl Default for Backend {
@@ -91,6 +93,8 @@ impl Default for Backend {
 		Self {
 			embed_operations: Arc::new(RwLock::new(HashMap::new())),
 			cancellation_token: CancellationToken::new(),
+			// todo: handle this error better
+			app_config: envy::from_env().expect("expected to have all env variables"),
 		}
 	}
 }
@@ -99,8 +103,8 @@ impl Default for Backend {
 impl Backend {
 	pub fn new(cancellation_token: CancellationToken) -> Self {
 		Self {
-			embed_operations: Arc::new(RwLock::new(HashMap::new())),
 			cancellation_token,
+			..Default::default()
 		}
 	}
 
@@ -173,7 +177,8 @@ impl Backend {
 						&[],  // todo: support features in EmbedRequest
 					)?;
 
-					let embedder = QueryEmbedder::new()?;
+					let config = envy::from_env::<AppConfig>().expect("no openai key");
+					let embedder = QueryEmbedder::new(config.openai_api_key)?;
 
 
 					embedder.embed_crate(&crate_name, &version_clone).await

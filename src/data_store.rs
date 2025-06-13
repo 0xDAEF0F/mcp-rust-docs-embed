@@ -1,4 +1,7 @@
-use crate::{config::AppConfig, utils::gen_table_name};
+use crate::{
+	config::{AppConfig, EmbeddingConfig},
+	utils::gen_table_name,
+};
 use anyhow::Result;
 use qdrant_client::{
 	Payload, Qdrant,
@@ -28,8 +31,12 @@ impl DataStore {
 		// setup qdrant collection - only create if it doesn't exist
 		let collection_exists = qdrant_client.collection_exists(&collection_name).await?;
 		if !collection_exists {
+			let embedding_config = EmbeddingConfig::default();
 			let collection = CreateCollectionBuilder::new(&collection_name)
-				.vectors_config(VectorParamsBuilder::new(1024, Distance::Cosine));
+				.vectors_config(VectorParamsBuilder::new(
+					embedding_config.vector_size,
+					Distance::Cosine,
+				));
 
 			let res = qdrant_client.create_collection(collection).await?;
 			assert!(res.result, "collection could not be created");
@@ -50,8 +57,10 @@ impl DataStore {
 			.delete_collection(&collection_name)
 			.await?;
 
-		let collection = CreateCollectionBuilder::new(&collection_name)
-			.vectors_config(VectorParamsBuilder::new(1024, Distance::Cosine));
+		let embedding_config = EmbeddingConfig::default();
+		let collection = CreateCollectionBuilder::new(&collection_name).vectors_config(
+			VectorParamsBuilder::new(embedding_config.vector_size, Distance::Cosine),
+		);
 
 		_ = self.qdrant_client.create_collection(collection).await?;
 

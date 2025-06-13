@@ -4,15 +4,17 @@ use anyhow::Result;
 use clap::Parser as _;
 use embed_anything_rs::{
 	commands::{Cli, Commands},
+	config::AppConfig,
 	query_embedder::QueryEmbedder,
 	services::{DocumentationService, QueryService},
 };
 
 #[tokio::main]
 async fn main() -> Result<()> {
-	// dotenvy::dotenv().ok(); // use this for production
 	dotenvy::dotenv_override().ok();
 	thin_logger::build(None).init();
+
+	let config: AppConfig = envy::from_env()?;
 
 	let cli = Cli::parse();
 
@@ -28,7 +30,7 @@ async fn main() -> Result<()> {
 			crate_name,
 			version,
 		} => {
-			let embedder = QueryEmbedder::new()?;
+			let embedder = QueryEmbedder::new(config.openai_api_key)?;
 			embedder.embed_crate(&crate_name, &version).await?;
 		}
 		Commands::Query {

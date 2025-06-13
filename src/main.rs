@@ -6,7 +6,7 @@ use tracing_subscriber::{self, EnvFilter};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-	dotenvy::dotenv().ok();
+	dotenvy::dotenv_override().ok();
 
 	tracing_subscriber::fmt()
 		.with_env_filter(

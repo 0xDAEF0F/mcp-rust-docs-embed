@@ -1,4 +1,4 @@
-use crate::{data_store::DataStore, query_embedder::QueryEmbedder};
+use crate::{config::AppConfig, data_store::DataStore, query_embedder::QueryEmbedder};
 use anyhow::Result;
 use thin_logger::log;
 
@@ -14,7 +14,8 @@ impl QueryService {
 		log::info!("querying for: {query}");
 
 		let data_store = DataStore::try_new(crate_name, version).await?;
-		let query_embedder = QueryEmbedder::new()?;
+		let config = envy::from_env::<AppConfig>()?;
+		let query_embedder = QueryEmbedder::new(config.openai_api_key)?;
 		let q_vec = query_embedder.embed_query(query).await?;
 
 		let results = data_store.query_with_content(q_vec, limit).await?;

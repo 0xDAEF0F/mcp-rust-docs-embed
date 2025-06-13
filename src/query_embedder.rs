@@ -1,9 +1,7 @@
 use crate::{data_store::DataStore, utils::find_md_files};
 use anyhow::{Context, Result};
 use embed_anything::{
-	config::{SplittingStrategy, TextEmbedConfig},
-	embed_file, embed_query,
-	embeddings::{embed::Embedder, local::text_embedding::ONNXModel},
+	config::TextEmbedConfig, embed_file, embed_query, embeddings::embed::Embedder,
 };
 use std::{path::Path, sync::Arc};
 use thin_logger::log;
@@ -14,22 +12,18 @@ pub struct QueryEmbedder {
 }
 
 impl QueryEmbedder {
-	pub fn new() -> Result<Self> {
-		let embedder = Arc::new(Embedder::from_pretrained_onnx(
-			"jina",
-			Some(ONNXModel::JINAV3),
-			None,
-			None,
-			None,
-			None,
+	pub fn new(openai_key: String) -> Result<Self> {
+		// use text-embedding-3-small for good performance and lower cost
+		let embedder = Arc::new(Embedder::from_pretrained_cloud(
+			"OpenAI",
+			"text-embedding-3-small",
+			Some(openai_key),
 		)?);
 
+		// keep the same chunking configuration
 		let config = TextEmbedConfig::default()
 			.with_chunk_size(1000, Some(0.0))
-			.with_batch_size(32)
-			.with_splitting_strategy(SplittingStrategy::Semantic {
-				semantic_encoder: embedder.clone(),
-			});
+			.with_batch_size(32);
 
 		Ok(Self { embedder, config })
 	}
