@@ -3,7 +3,6 @@ use serde::Deserialize;
 #[derive(Debug, Deserialize, Clone)]
 pub struct AppConfig {
 	pub qdrant_url: String,
-	pub sqlite_url: String,
 }
 
 #[derive(Debug, Clone)]

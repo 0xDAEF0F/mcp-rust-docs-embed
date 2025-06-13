@@ -4,20 +4,19 @@ use qdrant_client::{
 	Payload, Qdrant,
 	qdrant::{
 		CreateCollectionBuilder, Distance, PointStruct, SearchPointsBuilder,
-		UpsertPointsBuilder, VectorParamsBuilder, point_id::PointIdOptions,
+		UpsertPointsBuilder, VectorParamsBuilder,
 	},
 };
-use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
+use serde_json::json;
 
 pub struct DataStore {
 	pub qdrant_client: Qdrant,
-	pub sql_pool: SqlitePool,
 	crate_name: String,
 	version: String,
 }
 
 impl DataStore {
-	/// Initialize a new data store with both Qdrant and SQLite connections
+	/// Initialize a new data store with Qdrant
 	pub async fn try_new(crate_name: &str, version: &str) -> Result<Self> {
 		let config = envy::from_env::<AppConfig>()?;
 
@@ -36,37 +35,22 @@ impl DataStore {
 			assert!(res.result, "collection could not be created");
 		}
 
-		// setup sqlite connection
-		let sql_pool = SqlitePoolOptions::new().connect(&config.sqlite_url).await?;
-
-		// Create table if it doesn't exist
-		let table_name = gen_table_name(crate_name, version);
-		let create_table_query = format!(
-			"CREATE TABLE IF NOT EXISTS {table_name} (
-				id INTEGER PRIMARY KEY AUTOINCREMENT,
-				contents TEXT NOT NULL
-			)"
-		);
-		sqlx::query(&create_table_query).execute(&sql_pool).await?;
-
 		Ok(Self {
 			qdrant_client,
-			sql_pool,
 			crate_name: crate_name.to_string(),
 			version: version.to_string(),
 		})
 	}
 
-	/// Reset both the SQLite table and Qdrant collection
+	/// Reset the Qdrant collection
 	pub async fn reset(&self) -> Result<()> {
-		let table_name = gen_table_name(&self.crate_name, &self.version);
+		let collection_name = gen_table_name(&self.crate_name, &self.version);
 
-		let query = format!("DELETE FROM {table_name}");
-		sqlx::query(&query).execute(&self.sql_pool).await?;
+		self.qdrant_client
+			.delete_collection(&collection_name)
+			.await?;
 
-		self.qdrant_client.delete_collection(&table_name).await?;
-
-		let collection = CreateCollectionBuilder::new(&table_name)
+		let collection = CreateCollectionBuilder::new(&collection_name)
 			.vectors_config(VectorParamsBuilder::new(1024, Distance::Cosine));
 
 		_ = self.qdrant_client.create_collection(collection).await?;
@@ -74,27 +58,30 @@ impl DataStore {
 		Ok(())
 	}
 
-	/// Add embedding data to both SQLite (text content) and Qdrant (vector)
+	/// Add embedding data with content to Qdrant
 	pub async fn add_embedding_with_content(
 		&self,
 		content: &str,
 		vector: Vec<f32>,
 	) -> Result<u64> {
-		let table_name = gen_table_name(&self.crate_name, &self.version);
+		let collection_name = gen_table_name(&self.crate_name, &self.version);
 
-		let query = format!("INSERT INTO {table_name} (contents) VALUES (?1)");
-		let row_id = sqlx::query(&query)
-			.bind(content)
-			.execute(&self.sql_pool)
-			.await?
-			.last_insert_rowid();
+		// generate a unique id based on timestamp and random value
+		let id = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)?
+			.as_nanos() as u64;
 
-		// add vector to qdrant using the sqlite row id
-		let points = vec![PointStruct::new(row_id as u64, vector, Payload::default())];
-		let req = UpsertPointsBuilder::new(&table_name, points);
+		// create payload with the content
+		let payload = Payload::try_from(json!({
+			"content": content
+		}))?;
+
+		// add vector and content to qdrant
+		let points = vec![PointStruct::new(id, vector, payload)];
+		let req = UpsertPointsBuilder::new(&collection_name, points);
 		self.qdrant_client.upsert_points(req).await?;
 
-		Ok(row_id as u64)
+		Ok(id)
 	}
 
 	/// Query embeddings and return the corresponding text content
@@ -106,7 +93,8 @@ impl DataStore {
 		let collection_name = gen_table_name(&self.crate_name, &self.version);
 
 		let search_req =
-			SearchPointsBuilder::new(&collection_name, query_vector, max_results);
+			SearchPointsBuilder::new(&collection_name, query_vector, max_results)
+				.with_payload(true);
 		let search_res = self.qdrant_client.search_points(search_req).await?;
 
 		let mut results = Vec::new();
@@ -114,23 +102,15 @@ impl DataStore {
 		for result in search_res.result {
 			let score = result.score;
 
-			let point_id = result
-				.id
-				.expect("expected id")
-				.point_id_options
-				.expect("no point id");
+			// extract content from payload
+			let content = result
+				.payload
+				.get("content")
+				.and_then(|v| v.as_str())
+				.ok_or_else(|| anyhow::anyhow!("missing content in payload"))?
+				.to_string();
 
-			let PointIdOptions::Num(n) = point_id else {
-				anyhow::bail!("expected numeric point id");
-			};
-
-			let query = format!("SELECT contents FROM {collection_name} WHERE id = ?");
-			let row = sqlx::query_scalar::<_, String>(&query)
-				.bind(n as i64)
-				.fetch_one(&self.sql_pool)
-				.await?;
-
-			results.push((score, row));
+			results.push((score, content));
 		}
 
 		Ok(results)

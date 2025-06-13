@@ -18,7 +18,7 @@ pub fn find_md_files<P: AsRef<Path>>(dir: P) -> Result<Vec<PathBuf>> {
 	Ok(md_files)
 }
 
-/// Generate deterministically the table/collection name in "sqlite" and "qdrant" for a
+/// Generate deterministically the collection name in Qdrant for a
 /// given crate name and version
 pub fn gen_table_name(crate_name: &str, version: &str) -> String {
 	format!(
