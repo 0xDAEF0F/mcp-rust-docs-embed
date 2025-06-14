@@ -3,7 +3,7 @@ use crate::{
 	services::{DocumentationService, query::QueryService},
 	utils::{gen_table_name, resolve_latest_crate_version},
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
 use rmcp::{
 	Error as McpError, RoleServer, ServerHandler,
 	model::{Content, *},
@@ -160,7 +160,9 @@ impl Backend {
 						&[],  // todo: support features in EmbedRequest
 					)?;
 
-					let query_service = QueryService::new()?;
+					let query_service = QueryService::new()
+						.context("failed to initialize query service")
+						.map_err(BackendError::Internal)?;
 					query_service.embed_crate(&crate_name, &version_clone).await
 				} => res
 			};
@@ -198,14 +200,15 @@ impl Backend {
 		#[tool(aggr)] req: QueryRequest,
 	) -> Result<CallToolResult, McpError> {
 		let version = if req.version.is_empty() || req.version == "*" {
-			resolve_latest_crate_version(&req.crate_name)
-				.await
-				.map_err(|e| {
-					BackendError::Internal(anyhow::anyhow!(
-						"failed to resolve version: {}",
-						e
-					))
-				})?
+			match resolve_latest_crate_version(&req.crate_name).await {
+				Ok(v) => v,
+				Err(_) => {
+					return Err(BackendError::VersionResolutionFailed(
+						req.crate_name.clone(),
+					)
+					.into());
+				}
+			}
 		} else {
 			req.version
 		};
@@ -232,16 +235,15 @@ impl Backend {
 			}
 		}
 
-		let query_service = QueryService::new().map_err(|e| {
-			BackendError::ServiceInitialization(format!("query service: {}", e))
-		})?;
+		let query_service = QueryService::new()
+			.context("failed to initialize query service")
+			.map_err(BackendError::Internal)?;
 
 		let results = query_service
 			.query_embeddings(&req.query, &req.crate_name, &version, req.limit)
 			.await
-			.map_err(|e| {
-				BackendError::Internal(anyhow::anyhow!("query failed: {}", e))
-			})?;
+			.context("failed to query embeddings")
+			.map_err(BackendError::Internal)?;
 
 		if results.is_empty() {
 			return Err(BackendError::NoQueryResults(req.query.clone()).into());
@@ -300,27 +302,23 @@ impl Backend {
 	async fn list_embedded_crates(&self) -> Result<CallToolResult, McpError> {
 		let mut crate_versions: HashMap<String, Vec<String>> = HashMap::new();
 
-		let qdrant_url = dotenvy::var("QDRANT_URL").map_err(|_| {
-			BackendError::Internal(anyhow::anyhow!(
-				"QDRANT_URL environment variable not set"
-			))
-		})?;
+		let qdrant_url = dotenvy::var("QDRANT_URL")
+			.context("QDRANT_URL environment variable not set")
+			.map_err(BackendError::Internal)?;
 		let qdrant_api_key = dotenvy::var("QDRANT_API_KEY").ok();
 
 		let qdrant_client = qdrant_client::Qdrant::from_url(&qdrant_url)
 			.api_key(qdrant_api_key)
 			.build()
-			.map_err(|e| {
-				BackendError::Internal(anyhow::anyhow!(
-					"Failed to create Qdrant client: {}",
-					e
-				))
-			})?;
+			.context("failed to create Qdrant client")
+			.map_err(BackendError::Internal)?;
 
 		// list all collections from qdrant
-		let collections = qdrant_client.list_collections().await.map_err(|e| {
-			BackendError::Internal(anyhow::anyhow!("Failed to list collections: {}", e))
-		})?;
+		let collections = qdrant_client
+			.list_collections()
+			.await
+			.context("failed to list collections from Qdrant")
+			.map_err(BackendError::Internal)?;
 
 		for collection in collections.collections {
 			let name = collection.name;
@@ -344,9 +342,9 @@ impl Backend {
 			versions.sort();
 		}
 
-		let json_output = serde_json::to_string_pretty(&crate_versions).map_err(|e| {
-			BackendError::Internal(anyhow::anyhow!("Failed to serialize: {}", e))
-		})?;
+		let json_output = serde_json::to_string_pretty(&crate_versions)
+			.context("failed to serialize crate versions")
+			.map_err(BackendError::Internal)?;
 
 		Ok(CallToolResult::success(vec![Content::text(json_output)]))
 	}

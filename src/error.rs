@@ -18,28 +18,21 @@ pub enum BackendError {
 	#[error("no embedding operation found with ID: {0}")]
 	OperationNotFound(String),
 
-	#[error("failed to initialize service: {0}")]
-	ServiceInitialization(String),
-
 	#[error("internal error: {0}")]
-	Internal(#[source] anyhow::Error),
+	Internal(#[from] anyhow::Error),
 }
 
 impl From<BackendError> for McpError {
 	fn from(err: BackendError) -> Self {
 		use BackendError::*;
-
 		match err {
-			// user errors - invalid requests
-			VersionResolutionFailed(_)
-			| NoEmbeddedDocs { .. }
-			| NoQueryResults(_)
-			| OperationNotFound(_) => McpError::invalid_request(err.to_string(), None),
 			// internal errors
-			ServiceInitialization(_) | Internal(_) => {
+			Internal(_) => {
 				tracing::error!("Internal error: {:?}", err);
 				McpError::internal_error("Internal server error", None)
 			}
+			// user errors - invalid requests
+			_ => McpError::invalid_request(err.to_string(), None),
 		}
 	}
 }
