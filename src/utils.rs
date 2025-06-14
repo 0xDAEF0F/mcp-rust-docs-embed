@@ -58,7 +58,6 @@ pub async fn resolve_latest_crate_version(crate_name: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use iter_tools::Itertools;
 	use std::fs;
 	use tempfile::TempDir;
 
@@ -106,7 +105,7 @@ mod tests {
 			.flat_map(|p| {
 				anyhow::Ok(p.strip_prefix(temp_path)?.to_string_lossy().to_string())
 			})
-			.collect_vec();
+			.collect::<Vec<_>>();
 
 		for expected_file in &md_files_to_create {
 			assert!(

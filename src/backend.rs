@@ -80,19 +80,10 @@ pub enum EmbedStatus {
 	Failed,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Backend {
 	embed_operations: Arc<RwLock<HashMap<String, EmbedOperation>>>,
 	cancellation_token: CancellationToken,
-}
-
-impl Default for Backend {
-	fn default() -> Self {
-		Self {
-			embed_operations: Arc::new(RwLock::new(HashMap::new())),
-			cancellation_token: CancellationToken::new(),
-		}
-	}
 }
 
 #[tool(tool_box)]
