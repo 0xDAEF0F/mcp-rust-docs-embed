@@ -1,4 +1,5 @@
 use crate::{
+	error::BackendError,
 	services::{DocumentationService, query::QueryService},
 	utils::{gen_table_name, resolve_latest_crate_version},
 };
@@ -113,16 +114,11 @@ impl Backend {
 		let ct = self.cancellation_token.child_token();
 
 		let version = if req.version.is_empty() || req.version == "*" {
-			// resolve the latest version from crates.io
-			match resolve_latest_crate_version(&req.crate_name).await {
-				Ok(v) => v,
-				Err(_) => {
-					return Err(McpError::invalid_request(
-						"Could not resolve the latest crate version",
-						None,
-					));
-				}
-			}
+			resolve_latest_crate_version(&req.crate_name)
+				.await
+				.map_err(|_| {
+					BackendError::VersionResolutionFailed(req.crate_name.clone())
+				})?
 		} else {
 			req.version.clone()
 		};
@@ -198,8 +194,9 @@ impl Backend {
 		});
 
 		Ok(CallToolResult::success(vec![Content::text(format!(
-			"Started documentation generation and embedding process with ID: {}. Use \
-			 check_embed_status to monitor progress.",
+			"Started documentation generation and embedding process with ID: {}. Sleep \
+			 for about 8 seconds and then Use \"check_embed_status\" to monitor \
+			 progress --- do this until it either suceeds or fails.",
 			operation_id
 		))]))
 	}
@@ -210,13 +207,14 @@ impl Backend {
 		#[tool(aggr)] req: QueryRequest,
 	) -> Result<CallToolResult, McpError> {
 		let version = if req.version.is_empty() || req.version == "*" {
-			// resolve the latest version from crates.io
-			match resolve_latest_crate_version(&req.crate_name).await {
-				Ok(v) => v,
-				Err(_) => {
-					return Err(McpError::internal_error("Internal server error", None));
-				}
-			}
+			resolve_latest_crate_version(&req.crate_name)
+				.await
+				.map_err(|e| {
+					BackendError::Internal(anyhow::anyhow!(
+						"failed to resolve version: {}",
+						e
+					))
+				})?
 		} else {
 			req.version
 		};
@@ -230,14 +228,11 @@ impl Backend {
 			match qdrant_client.collection_exists(&table_name).await {
 				Ok(exists) => {
 					if !exists {
-						return Ok(CallToolResult::success(vec![Content::text(
-							format!(
-								"No embedded documentation found for {} v{}. Please run \
-								 embed_docs first to generate and embed the \
-								 documentation.",
-								req.crate_name, version
-							),
-						)]));
+						return Err(BackendError::NoEmbeddedDocs {
+							crate_name: req.crate_name.clone(),
+							version: version.clone(),
+						}
+						.into());
 					}
 				}
 				Err(_) => {
@@ -246,44 +241,37 @@ impl Backend {
 			}
 		}
 
-		let query_service = match QueryService::new() {
-			Ok(qs) => qs,
-			Err(_) => {
-				return Err(McpError::internal_error("Internal server error", None));
-			}
-		};
+		let query_service = QueryService::new().map_err(|e| {
+			BackendError::ServiceInitialization(format!("query service: {}", e))
+		})?;
 
-		match query_service
+		let results = query_service
 			.query_embeddings(&req.query, &req.crate_name, &version, req.limit)
 			.await
-		{
-			Ok(results) => {
-				if results.is_empty() {
-					Ok(CallToolResult::success(vec![Content::text(format!(
-						"No results found for query: {}",
-						req.query
-					))]))
-				} else {
-					let mut contents = vec![Content::text(format!(
-						"Found {} results for query: {}",
-						results.len(),
-						req.query
-					))];
+			.map_err(|e| {
+				BackendError::Internal(anyhow::anyhow!("query failed: {}", e))
+			})?;
 
-					for (i, (score, content)) in results.iter().enumerate() {
-						contents.push(Content::text(format!(
-							"\n--- Result {} (score: {:.4}) ---\n{}",
-							i + 1,
-							score,
-							content
-						)));
-					}
-
-					Ok(CallToolResult::success(contents))
-				}
-			}
-			Err(_) => Err(McpError::internal_error("Internal server error", None)),
+		if results.is_empty() {
+			return Err(BackendError::NoQueryResults(req.query.clone()).into());
 		}
+
+		let mut contents = vec![Content::text(format!(
+			"Found {} results for query: {}",
+			results.len(),
+			req.query
+		))];
+
+		for (i, (score, content)) in results.iter().enumerate() {
+			contents.push(Content::text(format!(
+				"\n--- Result {} (score: {:.4}) ---\n{}",
+				i + 1,
+				score,
+				content
+			)));
+		}
+
+		Ok(CallToolResult::success(contents))
 	}
 
 	#[tool(description = "Check the status of an embedding operation")]
@@ -297,22 +285,20 @@ impl Backend {
 			ops_lock.get(&req.operation_id).cloned()
 		};
 
-		if let Some(op) = op_data {
-			let status_text = match &op.status {
-				EmbedStatus::InProgress => "in_progress",
-				EmbedStatus::Completed => "completed",
-				EmbedStatus::Failed => "failed",
-			};
+		match op_data {
+			Some(op) => {
+				let status_text = match &op.status {
+					EmbedStatus::InProgress => "in_progress",
+					EmbedStatus::Completed => "completed",
+					EmbedStatus::Failed => "failed",
+				};
 
-			Ok(CallToolResult::success(vec![Content::text(format!(
-				"Embed operation {} for {} v{}: {} - {}",
-				req.operation_id, op.crate_name, op.version, status_text, op.message
-			))]))
-		} else {
-			Ok(CallToolResult::success(vec![Content::text(format!(
-				"No embedding operation found with ID: {}",
-				req.operation_id
-			))]))
+				Ok(CallToolResult::success(vec![Content::text(format!(
+					"Embed operation {} for {} v{}: {} - {}",
+					req.operation_id, op.crate_name, op.version, status_text, op.message
+				))]))
+			}
+			None => Err(BackendError::OperationNotFound(req.operation_id.clone()).into()),
 		}
 	}
 
