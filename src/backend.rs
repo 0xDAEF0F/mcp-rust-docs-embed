@@ -293,39 +293,62 @@ impl Backend {
 		}
 	}
 
-	#[tool(description = "List all embedding operations and their status")]
-	async fn list_embed_operations(&self) -> Result<CallToolResult, McpError> {
-		// Clone all operations to avoid holding the lock
-		let operations = {
-			let ops_lock = self.embed_operations.read().await;
-			ops_lock.clone()
-		};
+	#[tool(
+		description = "List all the crates and versions that are already embedded in \
+		               the mcp server"
+	)]
+	async fn list_embedded_crates(&self) -> Result<CallToolResult, McpError> {
+		let mut crate_versions: HashMap<String, Vec<String>> = HashMap::new();
 
-		if operations.is_empty() {
-			Ok(CallToolResult::success(vec![Content::text(
-				"No embedding operations found".to_string(),
-			)]))
-		} else {
-			let mut contents = vec![Content::text(format!(
-				"Found {} embedding operations:",
-				operations.len()
-			))];
+		let qdrant_url = dotenvy::var("QDRANT_URL").map_err(|_| {
+			BackendError::Internal(anyhow::anyhow!(
+				"QDRANT_URL environment variable not set"
+			))
+		})?;
+		let qdrant_api_key = dotenvy::var("QDRANT_API_KEY").ok();
 
-			for (id, op) in operations.iter() {
-				let status_text = match &op.status {
-					EmbedStatus::InProgress => "in_progress",
-					EmbedStatus::Completed => "completed",
-					EmbedStatus::Failed => "failed",
-				};
+		let qdrant_client = qdrant_client::Qdrant::from_url(&qdrant_url)
+			.api_key(qdrant_api_key)
+			.build()
+			.map_err(|e| {
+				BackendError::Internal(anyhow::anyhow!(
+					"Failed to create Qdrant client: {}",
+					e
+				))
+			})?;
 
-				contents.push(Content::text(format!(
-					"\n- {}: {} v{} [{}] - {}",
-					id, op.crate_name, op.version, status_text, op.message
-				)));
+		// list all collections from qdrant
+		let collections = qdrant_client.list_collections().await.map_err(|e| {
+			BackendError::Internal(anyhow::anyhow!("Failed to list collections: {}", e))
+		})?;
+
+		for collection in collections.collections {
+			let name = collection.name;
+
+			// parse collection name to extract crate name and version
+			// format is: {crate_name}_v{version}
+			if let Some(v_pos) = name.rfind("_v") {
+				let crate_name = &name[..v_pos];
+				let version = &name[v_pos + 2..];
+
+				// convert back underscores to original characters
+				let crate_name = crate_name.replace('_', "-");
+				let version = version.replace('_', ".");
+
+				crate_versions.entry(crate_name).or_default().push(version);
 			}
-
-			Ok(CallToolResult::success(contents))
 		}
+
+		// sort versions for each crate
+		for versions in crate_versions.values_mut() {
+			versions.sort();
+		}
+
+		let json_output = serde_json::to_string_pretty(&crate_versions).map_err(|e| {
+			BackendError::Internal(anyhow::anyhow!("Failed to serialize: {}", e))
+		})?;
+
+		Ok(CallToolResult::success(vec![Content::text(json_output)]))
 	}
 }
 
