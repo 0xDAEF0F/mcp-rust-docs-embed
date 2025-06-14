@@ -19,8 +19,11 @@ impl DataStore {
 	/// Initialize a new data store with Qdrant
 	pub async fn try_new(crate_name: &str, version: &str) -> Result<Self> {
 		let qdrant_url = dotenvy::var("QDRANT_URL").context("QDRANT_URL not set")?;
+		let qdrant_api_key = dotenvy::var("QDRANT_API_KEY").ok();
 
-		let qdrant_client = Qdrant::from_url(&qdrant_url).build()?;
+		let qdrant_client = Qdrant::from_url(&qdrant_url)
+			.api_key(qdrant_api_key)
+			.build()?;
 
 		// Generate deterministic names
 		let collection_name = gen_table_name(crate_name, version);
