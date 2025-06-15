@@ -7,5 +7,6 @@ pub mod data_store;
 pub mod doc_generator;
 pub mod doc_loader;
 pub mod error;
+pub mod features;
 pub mod services;
 pub mod utils;
