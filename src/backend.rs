@@ -153,11 +153,21 @@ impl Backend {
 					Err(anyhow::anyhow!("Operation cancelled"))
 				}
 				res = async {
-					// generate documentation first
+					// fetch all available features for the crate
+					let features = match crate::features::get_crate_features(&crate_name, Some(&version_clone)).await {
+						Ok(f) => f,
+						Err(e) => {
+							// log warning but continue without features
+							eprintln!("Warning: Could not fetch features for {} v{}: {}", crate_name, version_clone, e);
+							vec![]
+						}
+					};
+
+					// generate documentation first with all features enabled
 					DocumentationService::generate_docs(
 						&crate_name,
 						&version_clone,
-						&[],  // todo: support features in EmbedRequest
+						&features,
 					)?;
 
 					let query_service = QueryService::new()
