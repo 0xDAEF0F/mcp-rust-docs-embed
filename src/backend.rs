@@ -62,7 +62,7 @@ fn default_version() -> String {
 }
 
 fn default_limit() -> u64 {
-	5
+	10
 }
 
 #[derive(Debug, Clone)]

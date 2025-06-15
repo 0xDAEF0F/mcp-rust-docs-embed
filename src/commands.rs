@@ -37,8 +37,8 @@ pub enum Commands {
 		/// Crate version
 		#[arg(long, short)]
 		version: String,
-		/// Number of results to return (default: 5)
-		#[arg(long, short, default_value = "5")]
+		/// Number of results to return (default: 10)
+		#[arg(long, short, default_value = "10")]
 		limit: u64,
 	},
 }

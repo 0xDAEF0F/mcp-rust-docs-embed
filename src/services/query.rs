@@ -3,12 +3,13 @@ use anyhow::{Context, Result};
 use embed_anything::{
 	config::TextEmbedConfig, embed_file, embed_query, embeddings::embed::Embedder,
 };
+use futures::stream::{self, StreamExt};
 use std::{path::Path, sync::Arc};
 use thin_logger::log;
 
 pub struct QueryService {
 	embedder: Arc<Embedder>,
-	config: TextEmbedConfig,
+	config: Arc<TextEmbedConfig>,
 }
 
 impl QueryService {
@@ -22,9 +23,11 @@ impl QueryService {
 			Some(openai_key),
 		)?);
 
-		let config = TextEmbedConfig::default()
-			.with_chunk_size(1000, Some(0.0))
-			.with_batch_size(32);
+		let config = Arc::new(
+			TextEmbedConfig::default()
+				.with_chunk_size(1000, Some(0.0))
+				.with_batch_size(32),
+		);
 
 		Ok(Self { embedder, config })
 	}
@@ -54,7 +57,7 @@ impl QueryService {
 
 	pub async fn embed_query(&self, query: &str) -> Result<Vec<f32>> {
 		let query_embeddings =
-			embed_query(&[query], &self.embedder, Some(&self.config)).await?;
+			embed_query(&[query], &self.embedder, Some(&*self.config)).await?;
 
 		anyhow::ensure!(
 			!query_embeddings.is_empty(),
@@ -83,13 +86,29 @@ impl QueryService {
 		let files_to_embed = find_md_files(directory)?;
 		log::info!("proceeding to embed {} files", files_to_embed.len());
 
-		for file in files_to_embed {
-			log::info!("embedding file: {file:?}");
+		const CONCURRENT_FILES: usize = 10;
 
-			for embedding in embed_file(&file, &self.embedder, Some(&self.config), None)
-				.await?
-				.with_context(|| format!("no data to embed in file: {file:?}"))?
-			{
+		let results = stream::iter(files_to_embed)
+			.map(|file| {
+				let embedder = self.embedder.clone();
+				let config = self.config.clone();
+				async move {
+					log::info!("embedding file: {file:?}");
+					embed_file(&file, &embedder, Some(&*config), None)
+						.await
+						.with_context(|| format!("failed to embed file: {file:?}"))
+						.map(|embeddings| (file, embeddings))
+				}
+			})
+			.buffer_unordered(CONCURRENT_FILES)
+			.collect::<Vec<_>>()
+			.await;
+
+		for result in results {
+			let (_file, embeddings) = result?;
+			let embeddings = embeddings.context("no data to embed")?;
+
+			for embedding in embeddings {
 				let contents = embedding.text.context("expected text")?;
 				let embedding = embedding.embedding.to_dense()?;
 				let row_id = data_store
