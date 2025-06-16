@@ -6,6 +6,7 @@ use std::{
 	fs,
 	path::{Path, PathBuf},
 };
+use tracing::info;
 use walkdir::WalkDir;
 
 // Simple struct to hold document content, maybe add path later if needed
@@ -30,7 +31,7 @@ pub fn load_documents_with_version(
 	let doc_generator = DocGenerator::new(crate_name, crate_version_req, features_vec)?;
 	let docs_path = doc_generator.generate_docs()?;
 
-	eprintln!("Using documentation path: {}", docs_path.display());
+	info!("Using documentation path: {}", docs_path.display());
 
 	// Extract version from the generated docs path or index.html
 	let resolved_version = extract_version_from_docs(&docs_path, crate_name)?;

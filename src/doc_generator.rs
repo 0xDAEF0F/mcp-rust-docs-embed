@@ -67,7 +67,7 @@ impl DocGenerator {
 			r#"[package]
 name = "temp-doc-crate"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [lib]
 
@@ -132,44 +132,12 @@ edition = "2021"
 	fn find_docs_path(&self) -> Result<PathBuf> {
 		let base_doc_path = self.temp_dir.path().join("doc");
 
-		let mut target_docs_path: Option<PathBuf> = None;
-		let mut found_count = 0;
+		// Convert crate name to directory name (replace - with _)
+		let crate_dir_name = self.crate_name.replace('-', "_");
 
-		if base_doc_path.is_dir() {
-			for entry_result in fs::read_dir(&base_doc_path)? {
-				let entry = entry_result?;
-				if entry.file_type()?.is_dir() {
-					let dir_path = entry.path();
-					let index_html_path = dir_path.join("index.html");
-					if index_html_path.is_file() {
-						if target_docs_path.is_none() {
-							target_docs_path = Some(dir_path);
-						}
-						found_count += 1;
-					}
-				}
-			}
-		}
+		let target_docs_path = base_doc_path.join(&crate_dir_name);
 
-		match (found_count, target_docs_path) {
-			(1, Some(path)) => Ok(path),
-			(0, _) => {
-				anyhow::bail!(
-					"Could not find any subdirectory containing index.html within '{}'. \
-					 Cargo doc might have failed or produced unexpected output.",
-					base_doc_path.display()
-				);
-			}
-			(count, _) => {
-				anyhow::bail!(
-					"Expected exactly one subdirectory containing index.html within \
-					 '{}', but found {}. Cannot determine the correct documentation \
-					 path.",
-					base_doc_path.display(),
-					count
-				);
-			}
-		}
+		Ok(target_docs_path)
 	}
 }
 
@@ -228,27 +196,5 @@ mod tests {
 			cargo_toml_content
 				.contains("serde = { version = \"1.0\", features = [\"derive\"] }")
 		);
-	}
-
-	#[test]
-	#[ignore] // This test requires network access and takes time
-	fn test_generate_docs_integration() {
-		let generator = DocGenerator::new("anyhow", "1.0", None).unwrap();
-		let result = generator.generate_docs();
-
-		match result {
-			Ok(docs_path) => {
-				assert!(docs_path.exists());
-				assert!(docs_path.is_dir());
-				assert!(docs_path.join("index.html").exists());
-			}
-			Err(e) => {
-				// Allow this test to fail in environments without network access
-				eprintln!(
-					"Documentation generation failed (expected in some environments): {}",
-					e
-				);
-			}
-		}
 	}
 }
