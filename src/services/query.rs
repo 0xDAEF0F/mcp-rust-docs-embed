@@ -1,15 +1,18 @@
-use crate::{data_store::DataStore, utils::find_md_files};
-use anyhow::{Context, Result};
-use embed_anything::{
-	config::TextEmbedConfig, embed_file, embed_query, embeddings::embed::Embedder,
+use crate::{
+	data_store::DataStore,
+	embedder::{EmbedConfig, Embedder},
 };
+use anyhow::{Context, Result};
 use futures::stream::{self, StreamExt};
-use std::{path::Path, sync::Arc};
+use repo_glob::RepoGlob;
+use std::sync::Arc;
+use text_splitter::{ChunkConfig, CodeSplitter, MarkdownSplitter};
 use thin_logger::log;
+use tiktoken_rs::cl100k_base;
 
 pub struct QueryService {
 	embedder: Arc<Embedder>,
-	config: Arc<TextEmbedConfig>,
+	config: Arc<EmbedConfig>,
 }
 
 impl QueryService {
@@ -17,17 +20,12 @@ impl QueryService {
 		let openai_key =
 			dotenvy::var("OPENAI_API_KEY").context("OPENAI_API_KEY not set")?;
 
-		let embedder = Arc::new(Embedder::from_pretrained_cloud(
-			"OpenAI",
-			"text-embedding-3-small",
-			Some(openai_key),
+		let embedder = Arc::new(Embedder::new(
+			openai_key,
+			"text-embedding-3-small".to_string(),
 		)?);
 
-		let config = Arc::new(
-			TextEmbedConfig::default()
-				.with_chunk_size(1000, Some(0.0))
-				.with_batch_size(32),
-		);
+		let config = Arc::new(EmbedConfig::default());
 
 		Ok(Self { embedder, config })
 	}
@@ -56,63 +54,112 @@ impl QueryService {
 	}
 
 	pub async fn embed_query(&self, query: &str) -> Result<Vec<f32>> {
-		let query_embeddings =
-			embed_query(&[query], &self.embedder, Some(&*self.config)).await?;
-
-		anyhow::ensure!(
-			!query_embeddings.is_empty(),
-			"failed to generate query embedding"
-		);
-
-		let q_vec = query_embeddings[0].embedding.to_dense()?;
-
-		Ok(q_vec)
+		self.embedder.embed_query(query).await
 	}
 
-	pub async fn embed_crate(&self, crate_name: &str, version: &str) -> Result<()> {
-		let directory = format!("docs/{crate_name}/{version}");
+	pub async fn embed_crate(&self, repo_path: &str, version: &str) -> Result<()> {
+		log::info!("cloning repository for {repo_path}");
 
-		anyhow::ensure!(
-			Path::new(&directory).exists(),
-			"Documentation directory '{directory}' does not exist. Please run 'GenDocs' \
-			 first to generate documentation."
-		);
+		// repo_path is in format "owner/repo", convert to github url
+		let github_url = format!("https://github.com/{}", repo_path);
 
-		log::info!("Starting embedding process for directory: {directory}");
+		// clone the repository
+		let repo_glob = RepoGlob::clone(&github_url)?;
 
+		// find all rust and markdown files
+		let files = repo_glob.find_files(&["**/*.rs", "**/*.md"])?;
+		log::info!("found {} files to embed", files.len());
+
+		// extract crate name from repo path (e.g., "tokio-rs/tokio" -> "tokio")
+		let crate_name = repo_path.split('/').next_back().unwrap_or(repo_path);
 		let data_store = DataStore::try_new(crate_name, version).await?;
 		data_store.reset().await?;
 
-		let files_to_embed = find_md_files(directory)?;
-		log::info!("proceeding to embed {} files", files_to_embed.len());
+		// setup tokenizer and splitters
+		let tokenizer = cl100k_base()?;
+		let rust_splitter = CodeSplitter::new(
+			tree_sitter_rust::LANGUAGE,
+			ChunkConfig::new(self.config.chunk_size..self.config.chunk_size + 2500)
+				.with_sizer(tokenizer.clone()),
+		)?;
+		let md_splitter = MarkdownSplitter::new(
+			ChunkConfig::new(self.config.chunk_size..self.config.chunk_size + 2500)
+				.with_sizer(tokenizer),
+		);
 
 		const CONCURRENT_FILES: usize = 10;
 
-		let results = stream::iter(files_to_embed)
-			.map(|file| {
+		let results = stream::iter(files)
+			.map(|file_path| {
+				let repo_glob = &repo_glob;
+				let rust_splitter = &rust_splitter;
+				let md_splitter = &md_splitter;
 				let embedder = self.embedder.clone();
-				let config = self.config.clone();
+
 				async move {
-					log::info!("embedding file: {file:?}");
-					embed_file(&file, &embedder, Some(&*config), None)
-						.await
-						.with_context(|| format!("failed to embed file: {file:?}"))
-						.map(|embeddings| (file, embeddings))
+					log::info!("processing file: {file_path:?}");
+
+					let content = repo_glob
+						.read_file_content(&file_path)
+						.with_context(|| format!("failed to read file: {file_path:?}"))?;
+
+					let file_name =
+						file_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+
+					// choose splitter based on file extension
+					let chunks: Vec<&str> = if file_name.ends_with(".rs") {
+						rust_splitter.chunks(&content).collect()
+					} else if file_name.ends_with(".md") {
+						md_splitter.chunks(&content).collect()
+					} else {
+						vec![&content]
+					};
+
+					// prepare chunks with metadata
+					let file_path_str = file_path.display().to_string();
+					let total_chunks = chunks.len();
+					let chunks_with_metadata: Vec<String> = chunks
+						.into_iter()
+						.enumerate()
+						.map(|(i, chunk)| {
+							format!(
+								"File: {}\nChunk: {}/{}\n\n{}",
+								file_path_str,
+								i + 1,
+								total_chunks,
+								chunk
+							)
+						})
+						.collect();
+
+					// embed chunks
+					if !chunks_with_metadata.is_empty() {
+						let embeddings = embedder
+							.embed_texts(chunks_with_metadata.clone())
+							.await
+							.with_context(|| {
+								format!("failed to embed chunks from: {file_path:?}")
+							})?;
+
+						Ok::<Vec<(String, Vec<f32>)>, anyhow::Error>(
+							chunks_with_metadata.into_iter().zip(embeddings).collect(),
+						)
+					} else {
+						Ok(vec![])
+					}
 				}
 			})
 			.buffer_unordered(CONCURRENT_FILES)
 			.collect::<Vec<_>>()
 			.await;
 
+		// store all embeddings
 		for result in results {
-			let (_file, embeddings) = result?;
-			let embeddings = embeddings.context("no data to embed")?;
+			let chunk_embeddings = result?;
 
-			for embedding in embeddings {
-				let contents = embedding.text.context("expected text")?;
-				let embedding = embedding.embedding.to_dense()?;
+			for (content, embedding) in chunk_embeddings {
 				let row_id = data_store
-					.add_embedding_with_content(&contents, embedding)
+					.add_embedding_with_content(&content, embedding)
 					.await?;
 
 				log::trace!("added embedding with id: {row_id}");
@@ -120,7 +167,6 @@ impl QueryService {
 		}
 
 		log::info!("finished embedding all files");
-
 		Ok(())
 	}
 

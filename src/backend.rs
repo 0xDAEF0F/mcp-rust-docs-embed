@@ -1,7 +1,7 @@
 use crate::{
 	error::BackendError,
-	services::{DocumentationService, query::QueryService},
-	utils::{gen_table_name, resolve_latest_crate_version},
+	services::query::QueryService,
+	utils::{gen_table_name, resolve_crate_github_repo, resolve_latest_crate_version},
 };
 use anyhow::{Context, Result};
 use rmcp::{
@@ -15,18 +15,7 @@ use serde::Deserialize;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
-
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct GenDocsRequest {
-	#[schemars(description = "Crate name to generate docs for")]
-	pub crate_name: String,
-	#[serde(default = "default_version")]
-	#[schemars(description = "Crate version requirement (defaults to *, i.e., latest)")]
-	pub version: String,
-	#[serde(default)]
-	#[schemars(description = "Optional features to enable")]
-	pub features: Vec<String>,
-}
+use tracing::debug;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct EmbedRequest {
@@ -145,6 +134,22 @@ impl Backend {
 
 		let op_id_clone = operation_id.clone();
 		let crate_name = req.crate_name.clone();
+
+		let (repo_path, version_tag) =
+			match resolve_crate_github_repo(&crate_name, Some(&version)).await {
+				Ok(result) => result,
+				Err(e) => {
+					return Err(BackendError::Internal(anyhow::anyhow!(
+						"Failed to resolve repository for crate {}: {}",
+						crate_name,
+						e
+					))
+					.into());
+				}
+			};
+
+		debug!("the repo path is: {repo_path}, version tag: {version_tag:?}");
+
 		let version_clone = version.clone();
 
 		tokio::spawn(async move {
@@ -153,27 +158,10 @@ impl Backend {
 					Err(anyhow::anyhow!("Operation cancelled"))
 				}
 				res = async {
-					// fetch all available features for the crate
-					let features = match crate::features::get_crate_features(&crate_name, Some(&version_clone)).await {
-						Ok(f) => f,
-						Err(e) => {
-							// log warning but continue without features
-							eprintln!("Warning: Could not fetch features for {} v{}: {}", crate_name, version_clone, e);
-							vec![]
-						}
-					};
-
-					// generate documentation first with all features enabled
-					DocumentationService::generate_docs(
-						&crate_name,
-						&version_clone,
-						&features,
-					)?;
-
 					let query_service = QueryService::new()
 						.context("failed to initialize query service")
 						.map_err(BackendError::Internal)?;
-					query_service.embed_crate(&crate_name, &version_clone).await
+					query_service.embed_crate(&repo_path, &version_clone).await
 				} => res
 			};
 
@@ -183,8 +171,7 @@ impl Backend {
 					Ok(_) => {
 						op.status = EmbedStatus::Completed;
 						op.message = format!(
-							"Successfully generated and embedded documentation for {} \
-							 v{}",
+							"Successfully embedded repository contents for {} v{}",
 							op.crate_name, op.version
 						);
 					}

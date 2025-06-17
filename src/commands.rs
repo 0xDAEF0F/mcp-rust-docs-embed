@@ -8,23 +8,12 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-	/// Generate documentation for a crate
-	GenDocs {
-		/// Crate name to generate docs for
-		crate_name: String,
-		/// Optional features to enable
-		#[arg(long, short)]
-		features: Vec<String>,
-		/// Crate version requirement (defaults to latest)
-		#[arg(long, short, default_value = "*")]
-		version: String,
-	},
-	/// Create embeddings for all markdown files in a directory
+	/// Create embeddings for a crate by cloning its repository
 	Embed {
-		/// Crate name
+		/// Crate name (e.g. "dtolnay/anyhow")
 		crate_name: String,
-		/// Crate version
-		#[arg(long, short)]
+		/// Crate version for storage purposes
+		#[arg(long, short, default_value = "latest")]
 		version: String,
 	},
 	/// Query for similar embeddings
@@ -35,7 +24,7 @@ pub enum Commands {
 		#[arg(long, short)]
 		query: String,
 		/// Crate version
-		#[arg(long, short)]
+		#[arg(long, short, default_value = "latest")]
 		version: String,
 		/// Number of results to return (default: 10)
 		#[arg(long, short, default_value = "10")]

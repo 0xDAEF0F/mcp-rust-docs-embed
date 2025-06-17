@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::Parser as _;
 use embed_anything_rs::{
 	commands::{Cli, Commands},
-	services::{DocumentationService, query::QueryService},
+	services::query::QueryService,
 };
 
 #[tokio::main]
@@ -15,13 +15,6 @@ async fn main() -> Result<()> {
 	let cli = Cli::parse();
 
 	match cli.command {
-		Commands::GenDocs {
-			crate_name,
-			features,
-			version,
-		} => {
-			DocumentationService::generate_docs(&crate_name, &version, &features)?;
-		}
 		Commands::Embed {
 			crate_name,
 			version,
