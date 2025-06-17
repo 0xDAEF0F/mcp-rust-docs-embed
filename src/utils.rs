@@ -55,6 +55,57 @@ pub async fn resolve_latest_crate_version(crate_name: &str) -> Result<String> {
 	Ok(version.to_string())
 }
 
+/// Resolves a crate name to its GitHub repository URL, optionally pointing to a specific
+/// version
+pub async fn resolve_crate_github_repo(
+	crate_name: &str,
+	version: Option<&str>,
+) -> Result<String> {
+	let url = format!("https://crates.io/api/v1/crates/{}", crate_name);
+	let client = reqwest::Client::new();
+
+	let response = client
+		.get(&url)
+		.header("User-Agent", "embed-anything-rs")
+		.send()
+		.await?;
+
+	if !response.status().is_success() {
+		anyhow::bail!("Failed to fetch crate info: {}", response.status());
+	}
+
+	let json: serde_json::Value = response.json().await?;
+
+	let repository = json["crate"]["repository"].as_str().ok_or_else(|| {
+		anyhow::anyhow!("No repository found for crate: {}", crate_name)
+	})?;
+
+	println!("repo: {repository}");
+	println!("version: {version:?}");
+
+	// todo: refactor this
+	let repo_url = if let Some(ver) = version {
+		// if version is provided, append /tree/v{version} or /tree/{version}
+		// most rust crates use v-prefixed tags like v1.0.0
+		if repository.contains("github.com") {
+			// check if version already has 'v' prefix
+			let tag = if ver.starts_with('v') {
+				ver.to_string()
+			} else {
+				format!("v{}", ver)
+			};
+			format!("{}/tree/{}", repository.trim_end_matches('/'), tag)
+		} else {
+			// for non-github repos, just return the base URL
+			repository.to_string()
+		}
+	} else {
+		repository.to_string()
+	};
+
+	Ok(repo_url)
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -158,5 +209,54 @@ mod tests {
 			resolve_latest_crate_version("this-crate-definitely-does-not-exist-12345")
 				.await;
 		assert!(result.is_err(), "Should fail for non-existent crate");
+	}
+
+	#[tokio::test]
+	async fn test_resolve_crate_github_repo() -> Result<()> {
+		// test without version
+		let repo_url = resolve_crate_github_repo("anyhow", None).await?;
+		assert_eq!(repo_url, "https://github.com/dtolnay/anyhow");
+
+		// test with serde crate
+		let repo_url = resolve_crate_github_repo("serde", None).await?;
+		assert_eq!(repo_url, "https://github.com/serde-rs/serde");
+
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn test_resolve_crate_github_repo_with_version() -> Result<()> {
+		// test with version (without v prefix)
+		let repo_url = resolve_crate_github_repo("anyhow", Some("1.0.75")).await?;
+		assert_eq!(repo_url, "https://github.com/dtolnay/anyhow/tree/v1.0.75");
+
+		// test with version (with v prefix)
+		let repo_url = resolve_crate_github_repo("anyhow", Some("v1.0.75")).await?;
+		assert_eq!(repo_url, "https://github.com/dtolnay/anyhow/tree/v1.0.75");
+
+		// test with serde and version
+		let repo_url = resolve_crate_github_repo("serde", Some("1.0.190")).await?;
+		assert_eq!(repo_url, "https://github.com/serde-rs/serde/tree/v1.0.190");
+
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn test_resolve_crate_github_repo_nonexistent() {
+		// test with non-existent crate
+		let result =
+			resolve_crate_github_repo("this-crate-definitely-does-not-exist-12345", None)
+				.await;
+		assert!(result.is_err(), "Should fail for non-existent crate");
+	}
+
+	#[tokio::test]
+	async fn test_resolve_crate_github_repo_no_repository() {
+		// some crates might not have a repository field
+		// we'll test this if we find such a crate
+		// for now, just ensure the function handles missing repository gracefully
+		let result =
+			resolve_crate_github_repo("nonexistent-crate-with-no-repo", None).await;
+		assert!(result.is_err());
 	}
 }

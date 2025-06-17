@@ -10,7 +10,9 @@ async fn main() -> Result<()> {
 
 	tracing_subscriber::fmt()
 		.with_env_filter(
-			EnvFilter::from_default_env().add_directive(tracing::Level::DEBUG.into()),
+			EnvFilter::from_default_env()
+				.add_directive(tracing::Level::DEBUG.into())
+				.add_directive("html5ever=off".parse().unwrap()),
 		)
 		.with_writer(std::io::stderr)
 		.with_ansi(false)
