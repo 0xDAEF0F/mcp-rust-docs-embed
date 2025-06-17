@@ -38,3 +38,7 @@ futures = "0.3"
 axum = { version = "0.8", features = ["macros"] }
 tokio-util = "0.7.15"
 reqwest = { version = "0.12", features = ["json"] }
+troubleshoot-rs-doc = { path = "/Users/ale/mimi/prepos/troubleshoot-rs-doc" }
+text-splitter = "0.27.0"
+tiktoken-rs = "0.7.0"
+tree-sitter-rust = "0.24.0"
