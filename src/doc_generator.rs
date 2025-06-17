@@ -5,7 +5,7 @@ use cargo::{
 	util::context::GlobalContext,
 };
 use std::{
-	fs::{self, File, create_dir_all},
+	fs::{File, create_dir_all},
 	io::Write,
 	path::{Path, PathBuf},
 };
@@ -103,8 +103,8 @@ edition = "2024"
 			&[],   // cli_config
 		)?;
 
-		let mut ws = Workspace::new(&temp_manifest_path, &config)?;
-		ws.set_target_dir(cargo::util::Filesystem::new(
+		let mut workspace = Workspace::new(&temp_manifest_path, &config)?;
+		workspace.set_target_dir(cargo::util::Filesystem::new(
 			self.temp_dir.path().to_path_buf(),
 		));
 
@@ -115,7 +115,6 @@ edition = "2024"
 				json: false,
 			},
 		)?;
-
 		compile_opts.cli_features = CliFeatures::new_all(false);
 		compile_opts.spec = Packages::Packages(vec![self.crate_name.clone()]);
 
@@ -125,7 +124,7 @@ edition = "2024"
 			output_format: ops::OutputFormat::Html,
 		};
 
-		ops::doc(&ws, &doc_opts)?;
+		ops::doc(&workspace, &doc_opts)?;
 		Ok(())
 	}
 

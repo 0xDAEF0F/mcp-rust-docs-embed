@@ -6,7 +6,7 @@ use std::{
 	fs,
 	path::{Path, PathBuf},
 };
-use tracing::info;
+use tracing::{debug, info, warn};
 use walkdir::WalkDir;
 
 // Simple struct to hold document content, maybe add path later if needed
@@ -108,10 +108,7 @@ fn load_documents_internal(
 		.map(|e| e.into_path()) // Get the PathBuf
 		.collect();
 
-	eprintln!(
-		"[DEBUG] Found {} total HTML files initially.",
-		all_html_paths.len()
-	);
+	debug!("found {} total HTML files initially", all_html_paths.len());
 
 	// --- Group files by basename ---
 	let mut basename_groups: HashMap<String, Vec<PathBuf>> = HashMap::new();
@@ -123,13 +120,10 @@ fn load_documents_internal(
 					.or_default()
 					.push(path);
 			} else {
-				eprintln!(
-					"[WARN] Skipping file with non-UTF8 name: {}",
-					path.display()
-				);
+				warn!("skipping file with non-UTF8 name: {}", path.display());
 			}
 		} else {
-			eprintln!("[WARN] Skipping file with no name: {}", path.display());
+			warn!("skipping file with no name: {}", path.display());
 		}
 	}
 
@@ -192,15 +186,13 @@ fn load_documents_internal(
 				Ok(None) => {
 					// This case should ideally not happen if the input `paths` was not
 					// empty, but handle it defensively.
-					eprintln!(
-						"[WARN] No files found for basename '{basename}' during size \
-						 comparison."
+					warn!(
+						"no files found for basename '{basename}' during size comparison"
 					);
 				}
 				Err(e) => {
-					eprintln!(
-						"[WARN] Error getting metadata for basename '{basename}', \
-						 skipping: {e}"
+					warn!(
+						"error getting metadata for basename '{basename}', skipping: {e}"
 					);
 					// Decide if you want to skip the whole group or handle differently
 				}
@@ -208,8 +200,8 @@ fn load_documents_internal(
 		}
 	}
 
-	eprintln!(
-		"[DEBUG] Filtered down to {} files to process.",
+	debug!(
+		"filtered down to {} files to process",
 		paths_to_process.len()
 	);
 
@@ -219,8 +211,8 @@ fn load_documents_internal(
 		let relative_path = match path.strip_prefix(docs_path) {
 			Ok(p) => p.to_path_buf(),
 			Err(e) => {
-				eprintln!(
-					"[WARN] Failed to strip prefix {} from {}: {}",
+				warn!(
+					"failed to strip prefix {} from {}: {}",
 					docs_path.display(),
 					path.display(),
 					e
@@ -234,7 +226,7 @@ fn load_documents_internal(
 			// Read from the absolute path
 			Ok(content) => content,
 			Err(e) => {
-				eprintln!("[WARN] Failed to read file {}: {}", path.display(), e);
+				warn!("failed to read file {}: {}", path.display(), e);
 				continue; // Skip this file if reading fails
 			}
 		};
@@ -256,16 +248,13 @@ fn load_documents_internal(
 					html_content: html_content.clone(),
 				});
 			} else {
-				eprintln!(
-					"[DEBUG] No text content found in main section for: {}",
+				debug!(
+					"no text content found in main section for: {}",
 					path.display()
 				);
 			}
 		} else {
-			eprintln!(
-				"[DEBUG] 'main-content' selector not found for: {}",
-				path.display()
-			);
+			debug!("'main-content' selector not found for: {}", path.display());
 		}
 	}
 
