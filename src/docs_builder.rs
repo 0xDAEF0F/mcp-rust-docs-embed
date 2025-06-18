@@ -16,11 +16,11 @@ use tempfile::TempDir;
 pub fn build_crate_docs(
 	crate_name: &str,
 	crate_version: &str,
-	features: Option<Vec<String>>,
+	features: &[String],
 ) -> Result<(TempDir, PathBuf)> {
 	let temp_dir = tempfile::tempdir().context("Failed to create temporary directory")?;
 
-	create_temp_project(&temp_dir, crate_name, crate_version, features.as_ref())?;
+	create_temp_project(&temp_dir, crate_name, crate_version, features)?;
 	run_cargo_doc(&temp_dir, crate_name)?;
 
 	let crate_doc_path = temp_dir
@@ -34,22 +34,21 @@ fn create_temp_project(
 	temp_dir: &TempDir,
 	crate_name: &str,
 	crate_version: &str,
-	features: Option<&Vec<String>>,
+	features: &[String],
 ) -> Result<()> {
 	let temp_dir_path = temp_dir.path();
 	let temp_manifest_path = temp_dir_path.join("Cargo.toml");
 
-	let features_string = features
-		.filter(|f| !f.is_empty())
-		.map(|f| {
-			let feature_list = f
-				.iter()
-				.map(|feat| format!("\"{feat}\""))
-				.collect::<Vec<_>>()
-				.join(", ");
-			format!(", features = [{feature_list}]")
-		})
-		.unwrap_or_default();
+	let features_string = if features.is_empty() {
+		String::new()
+	} else {
+		let feature_list = features
+			.iter()
+			.map(|feat| format!("\"{feat}\""))
+			.collect::<Vec<_>>()
+			.join(", ");
+		format!(", features = [{feature_list}]")
+	};
 
 	let cargo_toml_content = format!(
 		r#"[package]
@@ -121,7 +120,7 @@ mod tests {
 
 	#[test]
 	fn test_build_crate_docs() {
-		let temp_dir = build_crate_docs("serde", "1.0", None);
+		let temp_dir = build_crate_docs("serde", "1.0", &[]);
 
 		assert!(temp_dir.is_ok());
 
@@ -140,7 +139,7 @@ mod tests {
 	#[test]
 	fn test_build_crate_docs_with_features() {
 		let features = vec!["derive".to_string(), "std".to_string()];
-		let result = build_crate_docs("serde", "1.0", Some(features));
+		let result = build_crate_docs("serde", "1.0", &features);
 		assert!(result.is_ok());
 
 		let (temp_dir, _) = result.unwrap();
@@ -155,7 +154,7 @@ mod tests {
 
 	#[test]
 	fn test_build_crate_docs_returns_correct_path() {
-		let result = build_crate_docs("serde", "1.0", None);
+		let result = build_crate_docs("serde", "1.0", &[]);
 		assert!(result.is_ok());
 
 		let (temp_dir, docs_path) = result.unwrap();

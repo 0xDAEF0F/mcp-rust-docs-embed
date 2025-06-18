@@ -1,6 +1,7 @@
 use crate::{
 	error::BackendError,
-	services::{DocumentationService, query::QueryService},
+	features::get_crate_features,
+	services::{generate_md_docs, query::QueryService},
 	utils::{gen_table_name, resolve_latest_crate_version},
 };
 use anyhow::{Context, Result};
@@ -13,8 +14,10 @@ use rmcp::{
 };
 use serde::Deserialize;
 use std::{collections::HashMap, sync::Arc};
+use tap::TapFallible;
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
+use tracing::error;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct GenDocsRequest {
@@ -95,7 +98,7 @@ impl Backend {
 		}
 	}
 
-	#[tool(description = "Generate and embed documentation for the given crate")]
+	#[tool(description = "Generate and embed documentation for a given crate")]
 	async fn embed_docs(
 		&self,
 		#[tool(aggr)] req: EmbedRequest,
@@ -154,17 +157,13 @@ impl Backend {
 				}
 				res = async {
 					// fetch all available features for the crate
-					let features = match crate::features::get_crate_features(&crate_name, Some(&version_clone)).await {
-						Ok(f) => f,
-						Err(e) => {
-							// log warning but continue without features
-							eprintln!("Warning: Could not fetch features for {} v{}: {}", crate_name, version_clone, e);
-							vec![]
-						}
-					};
+					let features = get_crate_features(&crate_name, Some(&version_clone))
+						.await
+						.tap_err(|e| error!("Warning: Could not fetch features for {} v{}: {}", crate_name, version_clone, e))
+						.unwrap_or_default();
 
 					// generate documentation first with all features enabled
-					DocumentationService::generate_docs(
+					generate_md_docs(
 						&crate_name,
 						&version_clone,
 						&features,
@@ -204,8 +203,11 @@ impl Backend {
 		))]))
 	}
 
-	#[tool(description = "Query embedded documentation")]
-	async fn query_docs(
+	#[tool(
+		description = "Perform semantic search on a crates' documentation vector \
+		               embeddings"
+	)]
+	async fn query_embeddings(
 		&self,
 		#[tool(aggr)] req: QueryRequest,
 	) -> Result<CallToolResult, McpError> {

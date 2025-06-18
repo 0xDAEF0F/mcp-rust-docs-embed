@@ -22,12 +22,11 @@ pub struct Document {
 pub fn load_documents(
 	crate_name: &str,
 	crate_version_req: &str,
-	features: Option<&Vec<String>>,
+	features: &[String],
 ) -> Result<(Vec<Document>, String)> {
 	// Generate documentation
-	let features_vec = features.cloned();
 	let (_temp_dir, docs_path) =
-		build_crate_docs(crate_name, crate_version_req, features_vec)?;
+		build_crate_docs(crate_name, crate_version_req, features)?;
 
 	info!("Using documentation path: {}", docs_path.display());
 

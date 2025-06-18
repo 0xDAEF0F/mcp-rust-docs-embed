@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::Parser as _;
 use embed_anything_rs::{
 	commands::{Cli, Commands},
-	services::{DocumentationService, query::QueryService},
+	services::{generate_md_docs, query::QueryService},
 };
 
 #[tokio::main]
@@ -20,7 +20,7 @@ async fn main() -> Result<()> {
 			features,
 			version,
 		} => {
-			DocumentationService::generate_docs(&crate_name, &version, &features)?;
+			generate_md_docs(&crate_name, &version, &features)?;
 		}
 		Commands::Embed {
 			crate_name,
