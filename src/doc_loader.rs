@@ -9,19 +9,17 @@ use std::{
 use tracing::{debug, info, warn};
 use walkdir::WalkDir;
 
-// Simple struct to hold document content, maybe add path later if needed
+// Simple struct to hold document content
 #[derive(Debug, Clone)]
 pub struct Document {
 	pub path: String,
-	pub content: String,
 	pub html_content: String,
 }
 
 /// Generates documentation for a given crate in a temporary directory,
 /// then loads and parses the HTML documents.
-/// Extracts text content from the main content area of rustdoc generated HTML.
 /// Returns both the documents and the resolved version.
-pub fn load_documents_with_version(
+pub fn load_documents(
 	crate_name: &str,
 	crate_version_req: &str,
 	features: Option<&Vec<String>>,
@@ -233,43 +231,16 @@ fn load_documents_internal(
 
 		let document = Html::parse_document(&html_content);
 
-		if let Some(main_content_element) = document.select(content_selector).next() {
-			let text_content: String = main_content_element
-				.text()
-				.map(|s| s.trim())
-				.filter(|s| !s.is_empty())
-				.collect::<Vec<&str>>()
-				.join("\n");
-
-			if !text_content.is_empty() {
-				documents.push(Document {
-					path: path_str,
-					content: text_content,
-					html_content: html_content.clone(),
-				});
-			} else {
-				debug!(
-					"no text content found in main section for: {}",
-					path.display()
-				);
-			}
+		if document.select(content_selector).next().is_some() {
+			// We found the main content, add the document
+			documents.push(Document {
+				path: path_str,
+				html_content: html_content.clone(),
+			});
 		} else {
 			debug!("'main-content' selector not found for: {}", path.display());
 		}
 	}
 
-	Ok(documents)
-}
-
-/// Generates documentation for a given crate in a temporary directory,
-/// then loads and parses the HTML documents.
-/// Extracts text content from the main content area of rustdoc generated HTML.
-pub fn load_documents(
-	crate_name: &str,
-	crate_version_req: &str,
-	features: Option<&Vec<String>>,
-) -> Result<Vec<Document>> {
-	let (documents, _version) =
-		load_documents_with_version(crate_name, crate_version_req, features)?;
 	Ok(documents)
 }

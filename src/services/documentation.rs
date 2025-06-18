@@ -28,14 +28,9 @@ impl DocumentationService {
 		};
 
 		// Generate docs and get both the documents and resolved version
-		let (documents, resolved_version) = if version == "*" {
-			doc_loader::load_documents_with_version(crate_name, version, features_option)
-				.context("Failed to load documents")?
-		} else {
-			let docs = doc_loader::load_documents(crate_name, version, features_option)
+		let (documents, resolved_version) =
+			doc_loader::load_documents(crate_name, version, features_option)
 				.context("Failed to load documents")?;
-			(docs, version.to_string())
-		};
 
 		log::info!("Loaded {} documents", documents.len());
 
