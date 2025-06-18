@@ -1,4 +1,4 @@
-use crate::doc_generator::DocGenerator;
+use crate::docs_builder::build_crate_docs;
 use anyhow::Result;
 use scraper::{Html, Selector};
 use std::{
@@ -26,10 +26,10 @@ pub fn load_documents_with_version(
 	crate_version_req: &str,
 	features: Option<&Vec<String>>,
 ) -> Result<(Vec<Document>, String)> {
-	// Generate documentation using the new DocGenerator
+	// Generate documentation
 	let features_vec = features.cloned();
-	let doc_generator = DocGenerator::new(crate_name, crate_version_req, features_vec)?;
-	let docs_path = doc_generator.generate_docs()?;
+	let (_temp_dir, docs_path) =
+		build_crate_docs(crate_name, crate_version_req, features_vec)?;
 
 	info!("Using documentation path: {}", docs_path.display());
 
