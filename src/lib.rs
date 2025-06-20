@@ -8,5 +8,7 @@ pub mod doc_loader;
 pub mod docs_builder;
 pub mod error;
 pub mod features;
+pub mod json_types;
+pub mod my_types;
 pub mod services;
 pub mod utils;

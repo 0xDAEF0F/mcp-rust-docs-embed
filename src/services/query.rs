@@ -1,35 +1,21 @@
-use crate::{data_store::DataStore, utils::find_md_files};
+use crate::data_store::DataStore;
 use anyhow::{Context, Result};
-use embed_anything::{
-	config::TextEmbedConfig, embed_file, embed_query, embeddings::embed::Embedder,
-};
-use futures::stream::{self, StreamExt};
-use std::{path::Path, sync::Arc};
+use async_openai::{Client, config::OpenAIConfig, types::CreateEmbeddingRequestArgs};
 use thin_logger::log;
 
 pub struct QueryService {
-	embedder: Arc<Embedder>,
-	config: Arc<TextEmbedConfig>,
+	client: Client<OpenAIConfig>,
 }
 
 impl QueryService {
 	pub fn new() -> Result<Self> {
-		let openai_key =
-			dotenvy::var("OPENAI_API_KEY").context("OPENAI_API_KEY not set")?;
+		// Check for OpenAI API key
+		dotenvy::var("OPENAI_API_KEY").context("OPENAI_API_KEY not set")?;
 
-		let embedder = Arc::new(Embedder::from_pretrained_cloud(
-			"OpenAI",
-			"text-embedding-3-small",
-			Some(openai_key),
-		)?);
+		let config = OpenAIConfig::new();
+		let client = Client::with_config(config);
 
-		let config = Arc::new(
-			TextEmbedConfig::default()
-				.with_chunk_size(1000, Some(0.0))
-				.with_batch_size(32),
-		);
-
-		Ok(Self { embedder, config })
+		Ok(Self { client })
 	}
 
 	pub async fn query_embeddings(
@@ -56,70 +42,32 @@ impl QueryService {
 	}
 
 	pub async fn embed_query(&self, query: &str) -> Result<Vec<f32>> {
-		let query_embeddings =
-			embed_query(&[query], &self.embedder, Some(&*self.config)).await?;
+		let request = CreateEmbeddingRequestArgs::default()
+			.model("text-embedding-3-small")
+			.input(vec![query])
+			.build()?;
+
+		let response = self
+			.client
+			.embeddings()
+			.create(request)
+			.await
+			.context("Failed to create query embedding")?;
 
 		anyhow::ensure!(
-			!query_embeddings.is_empty(),
+			!response.data.is_empty(),
 			"failed to generate query embedding"
 		);
 
-		let q_vec = query_embeddings[0].embedding.to_dense()?;
-
-		Ok(q_vec)
+		Ok(response.data[0].embedding.clone())
 	}
 
 	pub async fn embed_crate(&self, crate_name: &str, version: &str) -> Result<()> {
-		let directory = format!("docs/{crate_name}/{version}");
+		// This functionality is now handled by generate_and_embed_docs in
+		// documentation.rs
+		use crate::services::generate_and_embed_docs;
 
-		anyhow::ensure!(
-			Path::new(&directory).exists(),
-			"Documentation directory '{directory}' does not exist. Please run 'GenDocs' \
-			 first to generate documentation."
-		);
-
-		log::info!("Starting embedding process for directory: {directory}");
-
-		let data_store = DataStore::try_new(crate_name, version).await?;
-		data_store.reset().await?;
-
-		let files_to_embed = find_md_files(directory)?;
-		log::info!("proceeding to embed {} files", files_to_embed.len());
-
-		const CONCURRENT_FILES: usize = 10;
-
-		let results = stream::iter(files_to_embed)
-			.map(|file| {
-				let embedder = self.embedder.clone();
-				let config = self.config.clone();
-				async move {
-					log::info!("embedding file: {file:?}");
-					embed_file(&file, &embedder, Some(&*config), None)
-						.await
-						.with_context(|| format!("failed to embed file: {file:?}"))
-						.map(|embeddings| (file, embeddings))
-				}
-			})
-			.buffer_unordered(CONCURRENT_FILES)
-			.collect::<Vec<_>>()
-			.await;
-
-		for result in results {
-			let (_file, embeddings) = result?;
-			let embeddings = embeddings.context("no data to embed")?;
-
-			for embedding in embeddings {
-				let contents = embedding.text.context("expected text")?;
-				let embedding = embedding.embedding.to_dense()?;
-				let row_id = data_store
-					.add_embedding_with_content(&contents, embedding)
-					.await?;
-
-				log::trace!("added embedding with id: {row_id}");
-			}
-		}
-
-		log::info!("finished embedding all files");
+		generate_and_embed_docs(crate_name, version, &[]).await?;
 
 		Ok(())
 	}

@@ -5,14 +5,15 @@ use cargo::{
 	util::context::GlobalContext,
 };
 use std::{
+	env,
 	fs::{File, create_dir_all},
 	io::Write,
 	path::PathBuf,
 };
 use tempfile::TempDir;
 
-/// Generates documentation for a given crate in a temporary directory.
-/// Returns the `TempDir` and the `PathBuf` to where the documentation currently resides.
+/// Generates JSON documentation for a given crate in a temporary directory.
+/// Returns the `TempDir` and the `PathBuf` to the JSON documentation file.
 pub fn build_crate_docs(
 	crate_name: &str,
 	crate_version: &str,
@@ -23,11 +24,12 @@ pub fn build_crate_docs(
 	create_temp_project(&temp_dir, crate_name, crate_version, features)?;
 	run_cargo_doc(&temp_dir, crate_name)?;
 
-	let crate_doc_path = temp_dir
+	let json_doc_path = temp_dir
 		.path()
-		.join(format!("doc/{}", crate_name.replace('-', "_")));
+		.join("doc")
+		.join(format!("{}.json", crate_name.replace('-', "_")));
 
-	Ok((temp_dir, crate_doc_path))
+	Ok((temp_dir, json_doc_path))
 }
 
 fn create_temp_project(
@@ -77,17 +79,22 @@ edition = "2024"
 fn run_cargo_doc(temp_dir: &TempDir, crate_name: &str) -> Result<()> {
 	let temp_manifest_path = temp_dir.path().join("Cargo.toml");
 
+	// Set RUSTDOCFLAGS to generate JSON output
+	unsafe {
+		env::set_var("RUSTDOCFLAGS", "-Z unstable-options --output-format json");
+	}
+
 	let mut config = GlobalContext::default()?;
 	config.configure(
-		0,     // verbose
-		true,  // quiet
-		None,  // color
-		false, // frozen
-		false, // locked
-		false, // offline
-		&None, // target_dir
-		&[],   // unstable_flags
-		&[],   // cli_config
+		0,                                 // verbose
+		true,                              // quiet
+		None,                              // color
+		false,                             // frozen
+		false,                             // locked
+		false,                             // offline
+		&None,                             // target_dir
+		&["unstable-options".to_string()], // unstable_flags
+		&[],                               // cli_config
 	)?;
 
 	let mut workspace = Workspace::new(&temp_manifest_path, &config)?;
@@ -158,7 +165,7 @@ mod tests {
 		assert!(result.is_ok());
 
 		let (temp_dir, docs_path) = result.unwrap();
-		assert_eq!(docs_path, temp_dir.path().join("doc").join("serde"));
+		assert_eq!(docs_path, temp_dir.path().join("doc").join("serde.json"));
 	}
 
 	#[test]
@@ -166,12 +173,13 @@ mod tests {
 		// Test that the path is constructed correctly without actually building docs
 		let temp_dir = tempfile::tempdir().unwrap();
 		let crate_name = "test-crate";
-		let expected_path = temp_dir.path().join("doc").join("test_crate");
+		let expected_path = temp_dir.path().join("doc").join("test_crate.json");
 
 		// The actual construction logic from build_crate_docs
 		let constructed_path = temp_dir
 			.path()
-			.join(format!("doc/{}", crate_name.replace('-', "_")));
+			.join("doc")
+			.join(format!("{}.json", crate_name.replace('-', "_")));
 
 		assert_eq!(constructed_path, expected_path);
 	}

@@ -11,19 +11,13 @@ serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
 thin-logger = "0.1.2"
 tokio = { version = "1.45.1", features = ["full"] }
-embed_anything = { version = "0.6.0", features = ["ort"] }
-docx-rust = "=0.1.8"
-ort-sys = "=2.0.0-rc.9"
 clap = { version = "4.5.39", features = ["derive"] }
-candle-core = "0.9.1"
 qdrant-client = "1.14.0"
 walkdir = "2.5.0"
 uuid = "1.17.0"
 cargo = "0.88.0"
-scraper = "0.22.0"
 tempfile = "3.20.0"
 thiserror = "2.0.12"
-htmd = "0.1"
 rmcp = { git = "https://github.com/modelcontextprotocol/rust-sdk", branch = "main", features = [
     "server",
     "transport-sse-server",
@@ -39,3 +33,4 @@ axum = { version = "0.8", features = ["macros"] }
 tokio-util = "0.7.15"
 reqwest = { version = "0.12", features = ["json"] }
 tap = "1.0.1"
+async-openai = "0.28.3"

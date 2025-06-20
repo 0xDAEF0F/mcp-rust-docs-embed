@@ -1,7 +1,7 @@
 use crate::{
 	error::BackendError,
 	features::get_crate_features,
-	services::{generate_md_docs, query::QueryService},
+	services::{generate_and_embed_docs, query::QueryService},
 	utils::{gen_table_name, resolve_latest_crate_version},
 };
 use anyhow::{Context, Result};
@@ -162,17 +162,12 @@ impl Backend {
 						.tap_err(|e| error!("Warning: Could not fetch features for {} v{}: {}", crate_name, version_clone, e))
 						.unwrap_or_default();
 
-					// generate documentation first with all features enabled
-					generate_md_docs(
+					// generate documentation and embed it directly
+					generate_and_embed_docs(
 						&crate_name,
 						&version_clone,
 						&features,
-					)?;
-
-					let query_service = QueryService::new()
-						.context("failed to initialize query service")
-						.map_err(BackendError::Internal)?;
-					query_service.embed_crate(&crate_name, &version_clone).await
+					).await
 				} => res
 			};
 
@@ -197,7 +192,7 @@ impl Backend {
 
 		Ok(CallToolResult::success(vec![Content::text(format!(
 			"Started documentation generation and embedding process with ID: {}. Sleep \
-			 for about 8 seconds and then Use \"check_embed_status\" to monitor \
+			 for about 6 seconds and then Use \"check_embed_status\" to monitor \
 			 progress --- do this until it either suceeds or fails.",
 			operation_id
 		))]))
