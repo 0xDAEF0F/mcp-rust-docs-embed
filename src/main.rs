@@ -1,8 +1,24 @@
+#![allow(clippy::uninlined_format_args)]
+
 use anyhow::Result;
-use mcp_rust_docs_embed::backend::Backend;
+use crate::backend::Backend;
 use rmcp::transport::sse_server::{SseServer, SseServerConfig};
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::{self, EnvFilter};
+
+pub mod backend;
+pub mod commands;
+pub mod config;
+pub mod data_store;
+pub mod doc_loader;
+pub mod docs_builder;
+pub mod documentation;
+pub mod error;
+pub mod features;
+pub mod json_types;
+pub mod my_types;
+pub mod query;
+pub mod utils;
 
 #[tokio::main]
 async fn main() -> Result<()> {

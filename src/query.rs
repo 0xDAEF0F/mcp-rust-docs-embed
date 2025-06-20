@@ -62,16 +62,6 @@ impl QueryService {
 		Ok(response.data[0].embedding.clone())
 	}
 
-	pub async fn embed_crate(&self, crate_name: &str, version: &str) -> Result<()> {
-		// This functionality is now handled by generate_and_embed_docs in
-		// documentation.rs
-		use crate::services::generate_and_embed_docs;
-
-		generate_and_embed_docs(crate_name, version, &[]).await?;
-
-		Ok(())
-	}
-
 	pub fn print_results(results: &[(f32, String)]) {
 		for (i, (score, content)) in results.iter().enumerate() {
 			println!("\n--- Result {} (score: {:.4}) ---", i + 1, score);

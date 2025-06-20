@@ -1,7 +1,8 @@
 use crate::{
+	documentation::generate_and_embed_docs,
 	error::BackendError,
 	features::get_crate_features,
-	services::{generate_and_embed_docs, query::QueryService},
+	query::QueryService,
 	utils::{gen_table_name, resolve_latest_crate_version},
 };
 use anyhow::{Context, Result};
