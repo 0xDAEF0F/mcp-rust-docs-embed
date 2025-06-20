@@ -1,13 +1,12 @@
 #![allow(clippy::uninlined_format_args)]
 
-use anyhow::Result;
 use crate::backend::Backend;
+use anyhow::Result;
 use rmcp::transport::sse_server::{SseServer, SseServerConfig};
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::{self, EnvFilter};
 
 pub mod backend;
-pub mod commands;
 pub mod config;
 pub mod data_store;
 pub mod doc_loader;

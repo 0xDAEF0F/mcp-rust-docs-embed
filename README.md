@@ -1,41 +1,195 @@
 # mcp-rust-docs-embed
 
-Rust crate documentation embedding and semantic search service.
+An MCP (Model Context Protocol) server that provides semantic search capabilities for Rust crate documentation through vector embeddings.
 
-## Quick Start
+## Overview
+
+This MCP server enables AI assistants to search and understand Rust crate documentation by:
+
+- Generating JSON-formatted documentation using `cargo doc`
+- Creating vector embeddings of documentation content using OpenAI
+- Storing embeddings in Qdrant for efficient semantic search
+- Providing MCP tools for embedding and querying documentation
+
+## Features
+
+- **Automatic Documentation Generation**: Builds Rust documentation in JSON format using cargo's nightly toolchain
+- **Semantic Search**: Query documentation using natural language through vector embeddings
+- **Version Management**: Each crate version is stored separately for precise version-specific searches
+- **Feature Support**: Automatically detects and includes all available crate features during documentation generation
+- **Async Operations**: Long-running embedding tasks are handled asynchronously with status tracking
+
+## Prerequisites
+
+- Rust nightly toolchain (for JSON documentation output)
+- Qdrant vector database instance
+- OpenAI API key for embeddings
+
+## Installation
 
 ```bash
-# Generate and embed docs
-cargo run --example cli -- gen-docs <crate_name> --version <version>
-cargo run --example cli -- embed <crate_name> --version <version>
+# Clone the repository
+git clone https://github.com/yourusername/mcp-rust-docs-embed
+cd mcp-rust-docs-embed
 
-# Query
-cargo run --example cli -- query "your search query" --crate <crate_name>
-
-# MCP Server
-cargo run  # Starts at http://127.0.0.1:8000/sse
+# Build the project
+cargo build --release
 ```
 
-## API
+## Configuration
 
-Primary interfaces subject to change:
+Create a `.env` file with the following variables:
 
-- `DocumentationService::generate_docs()` - Cargo doc generation
-- `QueryService::embed_crate()` - Vector embedding pipeline
-- `QueryService::query_embeddings()` - Semantic search
-
-## Dependencies
-
-- Qdrant for vector storage
-- embed_anything for embeddings
-- MCP server for integration
-
-## Environment
-
-Configure via `.env`:
-
-```
+```env
+# Required
 QDRANT_URL=http://localhost:6334
-QDRANT_API_KEY=your_key
+OPENAI_API_KEY=your_openai_api_key
+
+# Optional
+QDRANT_API_KEY=your_qdrant_api_key
+PORT=8080  # Default: 8080
 ```
 
+## Usage
+
+### Starting the MCP Server
+
+```bash
+cargo run
+```
+
+The server will start on `http://127.0.0.1:8080/sse` (or your configured port).
+
+### Using with Claude Code or MCP Clients
+
+To use this server with Claude Code or other MCP clients, add it to your MCP configuration:
+
+#### Production Server
+
+```json
+{
+  "rust-docs": {
+    "type": "sse",
+    "url": "https://mcp-rust-docs-embed-production.up.railway.app/sse"
+  }
+}
+```
+
+#### Local Development
+
+For local development, replace the URL with your local server:
+
+```json
+{
+  "rust-docs": {
+    "type": "sse",
+    "url": "http://127.0.0.1:8080/sse"
+  }
+}
+```
+
+### Available MCP Tools
+
+#### 1. `embed_docs`
+
+Generate and embed documentation for a Rust crate.
+
+Parameters:
+
+- `crate_name` (required): Name of the crate to document
+- `version` (optional): Version to embed (defaults to latest)
+- `features` (optional): List of features to enable
+
+Example:
+
+```json
+{
+  "crate_name": "tokio",
+  "version": "1.40.0",
+  "features": ["full"]
+}
+```
+
+#### 2. `query_embeddings`
+
+Search embedded documentation using natural language.
+
+Parameters:
+
+- `query` (required): Natural language search query
+- `crate_name` (required): Crate to search in
+- `version` (optional): Version to search (defaults to latest)
+- `limit` (optional): Number of results (default: 10)
+
+Example:
+
+```json
+{
+  "query": "how to create an async tcp server",
+  "crate_name": "tokio",
+  "limit": 5
+}
+```
+
+#### 3. `check_embed_status`
+
+Check the status of an ongoing embedding operation.
+
+Parameters:
+
+- `operation_id` (required): ID returned by `embed_docs`
+
+#### 4. `list_embedded_crates`
+
+List all crates and versions that have been embedded.
+
+## Architecture
+
+### Documentation Pipeline
+
+1. **Documentation Generation** (`docs_builder.rs`)
+
+   - Creates a temporary Cargo project
+   - Adds target crate as dependency with all features
+   - Runs `cargo +nightly doc --output-format=json`
+
+2. **JSON Processing** (`doc_loader.rs`, `json_types.rs`)
+
+   - Parses Rust's JSON documentation format
+   - Extracts structured information about items, functions, types, etc.
+
+3. **Embedding Generation** (`documentation.rs`)
+
+   - Chunks documentation content appropriately
+   - Generates embeddings using OpenAI's text-embedding-3-small model
+   - Batches embeddings for efficiency
+
+4. **Storage** (`data_store.rs`)
+   - Stores embeddings in Qdrant collections
+   - Collection naming: `{crate_name}_v{version}` (normalized)
+   - Includes source content for retrieval
+
+### Query System
+
+The `QueryService` (`query.rs`) handles:
+
+- Converting queries to embeddings
+- Searching Qdrant for similar documentation
+- Returning relevant documentation snippets with similarity scores
+
+## Development
+
+### Key Dependencies
+
+- `rmcp` - Rust MCP SDK
+- `qdrant-client` - Vector database client
+- `cargo` - Programmatic cargo operations
+- `async-openai` - OpenAI API client
+- `axum` - Web framework for SSE server
+- `tokio` - Async runtime
+
+## Limitations
+
+- Requires Rust nightly for JSON documentation output
+- OpenAI API costs for embedding generation
+- Storage requirements grow with number of embedded crates

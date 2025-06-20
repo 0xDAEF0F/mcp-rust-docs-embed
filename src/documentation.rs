@@ -1,8 +1,4 @@
-use crate::{
-	data_store::DataStore,
-	doc_loader,
-	my_types::DocItem,
-};
+use crate::{data_store::DataStore, doc_loader, my_types::DocItem};
 use anyhow::{Context, Result};
 use async_openai::{Client, config::OpenAIConfig, types::CreateEmbeddingRequestArgs};
 use futures::stream::{self, StreamExt};
@@ -84,13 +80,13 @@ fn create_source_code_chunks(
 
 		// Create chunk with doc string (if any) and source code
 		let mut chunk = String::new();
-		
+
 		// Add documentation if available
 		if let Some(doc_string) = &item.doc_string {
 			chunk.push_str(doc_string);
 			chunk.push_str("\n\n");
 		}
-		
+
 		// Add the source code
 		chunk.push_str("```rust\n");
 		chunk.push_str(&code_chunk);
