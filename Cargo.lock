@@ -1106,36 +1106,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "embed-anything-rs"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-openai",
- "axum 0.8.4",
- "cargo",
- "chrono",
- "clap",
- "dotenvy",
- "futures",
- "qdrant-client",
- "reqwest",
- "rmcp",
- "schemars",
- "serde",
- "serde_json",
- "tap",
- "tempfile",
- "thin-logger",
- "thiserror 2.0.12",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
- "uuid",
- "walkdir",
-]
-
-[[package]]
 name = "encoding_rs"
 version = "0.8.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3018,6 +2988,36 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "mcp-rust-docs-embed"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-openai",
+ "axum 0.8.4",
+ "cargo",
+ "chrono",
+ "clap",
+ "dotenvy",
+ "futures",
+ "qdrant-client",
+ "reqwest",
+ "rmcp",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tap",
+ "tempfile",
+ "thin-logger",
+ "thiserror 2.0.12",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "walkdir",
 ]
 
 [[package]]

@@ -1,4 +1,4 @@
-# embed-anything-rs
+# mcp-rust-docs-embed
 
 Rust crate documentation embedding and semantic search service.
 
@@ -19,8 +19,9 @@ cargo run  # Starts at http://127.0.0.1:8000/sse
 ## API
 
 Primary interfaces subject to change:
+
 - `DocumentationService::generate_docs()` - Cargo doc generation
-- `QueryService::embed_crate()` - Vector embedding pipeline  
+- `QueryService::embed_crate()` - Vector embedding pipeline
 - `QueryService::query_embeddings()` - Semantic search
 
 ## Dependencies
@@ -32,7 +33,9 @@ Primary interfaces subject to change:
 ## Environment
 
 Configure via `.env`:
+
 ```
 QDRANT_URL=http://localhost:6334
 QDRANT_API_KEY=your_key
 ```
+

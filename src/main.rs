@@ -1,5 +1,5 @@
 use anyhow::Result;
-use embed_anything_rs::backend::Backend;
+use mcp_rust_docs_embed::backend::Backend;
 use rmcp::transport::sse_server::{SseServer, SseServerConfig};
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::{self, EnvFilter};
