@@ -24,6 +24,7 @@ pub struct DocItem {
 	pub r#type: ItemType,
 	pub source_code: String,
 	pub filename: String,
+	pub span: FileRange,
 }
 
 impl fmt::Display for DocItem {
@@ -87,9 +88,12 @@ pub fn create_doc_items_with_source(
 		// Line numbers in the JSON are 1-based
 		let mut start_line = (span.begin.0 as usize).saturating_sub(1);
 		let end_line = (span.end.0 as usize).min(lines.len());
-		
+
 		// For struct/enum/constant/function items, include any preceding attributes
-		if matches!(item_type, ItemType::Struct | ItemType::Enum | ItemType::Constant | ItemType::Function) {
+		if matches!(
+			item_type,
+			ItemType::Struct | ItemType::Enum | ItemType::Constant | ItemType::Function
+		) {
 			start_line = find_start_line_with_attributes(&lines, start_line);
 		}
 
@@ -113,9 +117,16 @@ pub fn create_doc_items_with_source(
 			continue;
 		}
 
-		// Skip functions that are part of impl blocks by checking for self parameter
-		if item_type == ItemType::Function && is_impl_function(&source_code) {
-			continue;
+		// Skip false "function" items that are actually just derive attributes
+		// These are a rustdoc JSON bug where derive attributes get classified as
+		// functions
+		if item_type == ItemType::Function {
+			let trimmed_code = source_code.trim();
+			// If it starts with attributes and doesn't contain "fn ", it's not a real
+			// function
+			if trimmed_code.starts_with("#[") && !trimmed_code.contains("fn ") {
+				continue;
+			}
 		}
 
 		doc_items.push(DocItem {
@@ -124,22 +135,74 @@ pub fn create_doc_items_with_source(
 			r#type: item_type,
 			source_code,
 			filename: span.filename.clone(),
+			span: FileRange {
+				start: span.begin,
+				end: span.end,
+			},
 		});
 	}
 
-	Ok(doc_items)
+	// Second pass: filter out functions that are within impl blocks
+	filter_impl_functions(doc_items)
+}
+
+/// Filters out functions that are within impl blocks by comparing spans
+fn filter_impl_functions(doc_items: Vec<DocItem>) -> Result<Vec<DocItem>> {
+	// collect all impl block spans grouped by filename
+	let impl_spans: std::collections::HashMap<String, Vec<FileRange>> = doc_items
+		.iter()
+		.filter(|item| item.r#type == ItemType::Impl)
+		.fold(std::collections::HashMap::new(), |mut acc, item| {
+			acc.entry(item.filename.clone())
+				.or_default()
+				.push(item.span.clone());
+			acc
+		});
+
+	// filter out functions that are within any impl block span
+	let filtered_items = doc_items
+		.into_iter()
+		.filter(|item| {
+			if item.r#type != ItemType::Function {
+				return true;
+			}
+
+			// check if this function's span is within any impl block span in the same
+			// file
+			if let Some(impl_ranges) = impl_spans.get(&item.filename) {
+				for impl_range in impl_ranges {
+					if is_span_within(impl_range, &item.span) {
+						return false;
+					}
+				}
+			}
+
+			true
+		})
+		.collect();
+
+	Ok(filtered_items)
+}
+
+/// checks if the inner span is completely within the outer span
+fn is_span_within(outer: &FileRange, inner: &FileRange) -> bool {
+	// check if inner span is completely within outer span
+	(outer.start.0 < inner.start.0
+		|| (outer.start.0 == inner.start.0 && outer.start.1 <= inner.start.1))
+		&& (outer.end.0 > inner.end.0
+			|| (outer.end.0 == inner.end.0 && outer.end.1 >= inner.end.1))
 }
 
 /// Finds the start line that includes any preceding attributes for an item
 /// Returns the adjusted start line index (0-based) that includes all attributes
 fn find_start_line_with_attributes(lines: &[&str], item_start_line: usize) -> usize {
 	let mut current_line = item_start_line;
-	
+
 	// Look backwards for attributes and empty lines
 	while current_line > 0 {
 		let prev_line_idx = current_line - 1;
 		let prev_line = lines[prev_line_idx].trim();
-		
+
 		if prev_line.starts_with("#[") || prev_line.is_empty() {
 			// Include attributes and empty lines
 			current_line = prev_line_idx;
@@ -148,67 +211,8 @@ fn find_start_line_with_attributes(lines: &[&str], item_start_line: usize) -> us
 			break;
 		}
 	}
-	
+
 	current_line
-}
-
-/// Checks if a function is part of an impl block by looking for self parameter
-fn is_impl_function(source_code: &str) -> bool {
-	// Find the opening parenthesis after 'fn' keyword
-	// This handles generics that might appear between fn name and parameters
-	if let Some(fn_pos) = source_code.find("fn ") {
-		// Find the opening parenthesis for parameters
-		if let Some(paren_pos) = source_code[fn_pos..].find('(') {
-			let after_paren = &source_code[fn_pos + paren_pos + 1..];
-			// Get everything up to the first comma or closing paren
-			let first_param = if let Some(comma_pos) = after_paren.find(',') {
-				&after_paren[..comma_pos]
-			} else if let Some(paren_pos) = after_paren.find(')') {
-				&after_paren[..paren_pos]
-			} else {
-				return false;
-			};
-
-			// Remove whitespace and check if it contains "self" as a whole word
-			let normalized = first_param.trim();
-
-			// Simple cases
-			if normalized == "self" || normalized == "&self" || normalized == "&mut self"
-			{
-				return true;
-			}
-
-			// Handle lifetimes and spacing variations
-			// Split by whitespace and filter empty strings
-			let parts: Vec<&str> = normalized.split_whitespace().collect();
-
-			// Check various patterns
-			match parts.as_slice() {
-				["self"] => true,
-				["&", "self"] => true,
-				["&", "mut", "self"] => true,
-				["&mut", "self"] => true,
-				// Handle lifetime cases
-				[s, "self"] if s.starts_with("&'") => true,
-				["&", l, "self"] if l.starts_with("'") => true,
-				["&", l, "mut", "self"] if l.starts_with("'") => true,
-				// Handle self with type annotation
-				["self", ":", ..] => true,
-				["&self", ":", ..] => true,
-				["&", "self", ":", ..] => true,
-				["&mut", "self", ":", ..] => true,
-				["&", "mut", "self", ":", ..] => true,
-				[s, "self", ":", ..] if s.starts_with("&'") => true,
-				["&", l, "self", ":", ..] if l.starts_with("'") => true,
-				["&", l, "mut", "self", ":", ..] if l.starts_with("'") => true,
-				_ => false,
-			}
-		} else {
-			false
-		}
-	} else {
-		false
-	}
 }
 
 #[cfg(test)]
@@ -216,32 +220,61 @@ mod tests {
 	use super::*;
 
 	#[test]
-	fn test_is_impl_function() {
-		// Test regular impl functions
-		assert!(is_impl_function("fn foo(&self) -> i32 { 42 }"));
-		assert!(is_impl_function("fn foo(&mut self) -> i32 { 42 }"));
-		assert!(is_impl_function("fn foo(self) -> i32 { 42 }"));
-		assert!(is_impl_function("fn foo(&'a self) -> i32 { 42 }"));
-		assert!(is_impl_function("fn foo(&'_ self) -> i32 { 42 }"));
-		assert!(is_impl_function("fn foo( &self ) -> i32 { 42 }"));
-		assert!(is_impl_function("fn foo( & mut self ) -> i32 { 42 }"));
+	fn test_is_span_within() {
+		// Test case where inner is completely within outer
+		let outer = FileRange {
+			start: (10, 0),
+			end: (20, 0),
+		};
+		let inner = FileRange {
+			start: (12, 0),
+			end: (18, 0),
+		};
+		assert!(is_span_within(&outer, &inner));
 
-		// Test with generics
-		assert!(is_impl_function("fn foo<T>(&self) -> T { todo!() }"));
-		assert!(is_impl_function("fn foo<T, U>(&mut self) -> T { todo!() }"));
-		assert!(is_impl_function(
-			"fn foo<'a, T: Clone>(&'a self) -> &'a T { todo!() }"
-		));
+		// Test case where inner starts at same line but different column
+		let outer = FileRange {
+			start: (10, 5),
+			end: (20, 0),
+		};
+		let inner = FileRange {
+			start: (10, 10),
+			end: (18, 0),
+		};
+		assert!(is_span_within(&outer, &inner));
 
-		// Test standalone functions
-		assert!(!is_impl_function("fn foo() -> i32 { 42 }"));
-		assert!(!is_impl_function("fn foo(x: i32) -> i32 { x }"));
-		assert!(!is_impl_function("fn foo(x: &Self) -> i32 { 42 }"));
-		assert!(!is_impl_function("fn foo(selfish: i32) -> i32 { selfish }"));
-		assert!(!is_impl_function("fn foo<T>(x: T) -> T { x }"));
-		assert!(!is_impl_function(
-			"fn foo<T>(x: &T, y: &T) -> bool { x == y }"
-		));
+		// Test case where inner is not within outer (starts before)
+		let outer = FileRange {
+			start: (10, 0),
+			end: (20, 0),
+		};
+		let inner = FileRange {
+			start: (5, 0),
+			end: (15, 0),
+		};
+		assert!(!is_span_within(&outer, &inner));
+
+		// Test case where inner is not within outer (ends after)
+		let outer = FileRange {
+			start: (10, 0),
+			end: (20, 0),
+		};
+		let inner = FileRange {
+			start: (15, 0),
+			end: (25, 0),
+		};
+		assert!(!is_span_within(&outer, &inner));
+
+		// Test case where spans are identical
+		let outer = FileRange {
+			start: (10, 0),
+			end: (20, 0),
+		};
+		let inner = FileRange {
+			start: (10, 0),
+			end: (20, 0),
+		};
+		assert!(is_span_within(&outer, &inner)); // identical spans should be considered within
 	}
 
 	#[test]

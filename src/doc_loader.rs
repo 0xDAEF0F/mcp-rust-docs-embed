@@ -3,7 +3,7 @@ use crate::{
 	json_types::JsonDocs,
 	my_types::{DocItem, create_doc_items_with_source},
 };
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::fs;
 use tracing::info;
 
@@ -22,13 +22,10 @@ pub fn load_documents(
 	info!("Using documentation path: {}", json_path.display());
 
 	// Read the JSON file
-	let json_content = fs::read_to_string(&json_path).with_context(|| {
-		format!("Failed to read JSON file at {}", json_path.display())
-	})?;
+	let json_content = fs::read_to_string(&json_path)?;
 
 	// Parse JSON to get documentation items
-	let rustdoc: JsonDocs = serde_json::from_str(&json_content)
-		.context("Failed to parse JSON documentation")?;
+	let rustdoc: JsonDocs = serde_json::from_str(&json_content)?;
 
 	// Create DocItems with source code
 	let doc_items = create_doc_items_with_source(&rustdoc, temp_dir.path())?;

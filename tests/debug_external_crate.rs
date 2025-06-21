@@ -1,5 +1,5 @@
 use anyhow::Result;
-use mcp_rust_docs_embed::{doc_loader, my_types::ItemType};
+use mcp_rust_docs_embed::doc_loader;
 use std::collections::HashMap;
 
 #[tokio::test]
