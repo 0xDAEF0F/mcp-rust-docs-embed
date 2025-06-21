@@ -103,6 +103,11 @@ pub fn create_doc_items_with_source(
 		let code_lines = &lines[start_line..end_line];
 		let source_code = code_lines.join("\n");
 
+		// Skip functions that are part of impl blocks by checking for self parameter
+		if item_type == ItemType::Function && is_impl_function(&source_code) {
+			continue;
+		}
+
 		doc_items.push(DocItem {
 			name: item.name.clone(),
 			doc_string: item.docs.clone(),
@@ -113,4 +118,97 @@ pub fn create_doc_items_with_source(
 	}
 
 	Ok(doc_items)
+}
+
+/// Checks if a function is part of an impl block by looking for self parameter
+fn is_impl_function(source_code: &str) -> bool {
+	// Find the opening parenthesis after 'fn' keyword
+	// This handles generics that might appear between fn name and parameters
+	if let Some(fn_pos) = source_code.find("fn ") {
+		// Find the opening parenthesis for parameters
+		if let Some(paren_pos) = source_code[fn_pos..].find('(') {
+			let after_paren = &source_code[fn_pos + paren_pos + 1..];
+			// Get everything up to the first comma or closing paren
+			let first_param = if let Some(comma_pos) = after_paren.find(',') {
+				&after_paren[..comma_pos]
+			} else if let Some(paren_pos) = after_paren.find(')') {
+				&after_paren[..paren_pos]
+			} else {
+				return false;
+			};
+
+			// Remove whitespace and check if it contains "self" as a whole word
+			let normalized = first_param.trim();
+
+			// Simple cases
+			if normalized == "self" || normalized == "&self" || normalized == "&mut self"
+			{
+				return true;
+			}
+
+			// Handle lifetimes and spacing variations
+			// Split by whitespace and filter empty strings
+			let parts: Vec<&str> = normalized.split_whitespace().collect();
+
+			// Check various patterns
+			match parts.as_slice() {
+				["self"] => true,
+				["&", "self"] => true,
+				["&", "mut", "self"] => true,
+				["&mut", "self"] => true,
+				// Handle lifetime cases
+				[s, "self"] if s.starts_with("&'") => true,
+				["&", l, "self"] if l.starts_with("'") => true,
+				["&", l, "mut", "self"] if l.starts_with("'") => true,
+				// Handle self with type annotation
+				["self", ":", ..] => true,
+				["&self", ":", ..] => true,
+				["&", "self", ":", ..] => true,
+				["&mut", "self", ":", ..] => true,
+				["&", "mut", "self", ":", ..] => true,
+				[s, "self", ":", ..] if s.starts_with("&'") => true,
+				["&", l, "self", ":", ..] if l.starts_with("'") => true,
+				["&", l, "mut", "self", ":", ..] if l.starts_with("'") => true,
+				_ => false,
+			}
+		} else {
+			false
+		}
+	} else {
+		false
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_is_impl_function() {
+		// Test regular impl functions
+		assert!(is_impl_function("fn foo(&self) -> i32 { 42 }"));
+		assert!(is_impl_function("fn foo(&mut self) -> i32 { 42 }"));
+		assert!(is_impl_function("fn foo(self) -> i32 { 42 }"));
+		assert!(is_impl_function("fn foo(&'a self) -> i32 { 42 }"));
+		assert!(is_impl_function("fn foo(&'_ self) -> i32 { 42 }"));
+		assert!(is_impl_function("fn foo( &self ) -> i32 { 42 }"));
+		assert!(is_impl_function("fn foo( & mut self ) -> i32 { 42 }"));
+
+		// Test with generics
+		assert!(is_impl_function("fn foo<T>(&self) -> T { todo!() }"));
+		assert!(is_impl_function("fn foo<T, U>(&mut self) -> T { todo!() }"));
+		assert!(is_impl_function(
+			"fn foo<'a, T: Clone>(&'a self) -> &'a T { todo!() }"
+		));
+
+		// Test standalone functions
+		assert!(!is_impl_function("fn foo() -> i32 { 42 }"));
+		assert!(!is_impl_function("fn foo(x: i32) -> i32 { x }"));
+		assert!(!is_impl_function("fn foo(x: &Self) -> i32 { 42 }"));
+		assert!(!is_impl_function("fn foo(selfish: i32) -> i32 { selfish }"));
+		assert!(!is_impl_function("fn foo<T>(x: T) -> T { x }"));
+		assert!(!is_impl_function(
+			"fn foo<T>(x: &T, y: &T) -> bool { x == y }"
+		));
+	}
 }

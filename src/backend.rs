@@ -70,12 +70,13 @@ fn default_limit() -> u64 {
 }
 
 /// Selects safe features to avoid mutually exclusive conflicts.
-/// 
+///
 /// Many Rust crates have mutually exclusive features that cause compile errors
 /// when enabled together (e.g., runtime-tokio vs runtime-async-std).
-/// 
+///
 /// This function implements a safe strategy:
-/// 1. If "full" feature exists, use only that (it typically includes all compatible features)
+/// 1. If "full" feature exists, use only that (it typically includes all compatible
+///    features)
 /// 2. Otherwise, if "default" feature exists, use only that
 /// 3. Otherwise, use no features to ensure compilation succeeds
 fn select_safe_features(all_features: &[String]) -> Vec<String> {
