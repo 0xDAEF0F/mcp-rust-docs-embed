@@ -69,6 +69,26 @@ fn default_limit() -> u64 {
 	10
 }
 
+/// Selects safe features to avoid mutually exclusive conflicts.
+/// 
+/// Many Rust crates have mutually exclusive features that cause compile errors
+/// when enabled together (e.g., runtime-tokio vs runtime-async-std).
+/// 
+/// This function implements a safe strategy:
+/// 1. If "full" feature exists, use only that (it typically includes all compatible features)
+/// 2. Otherwise, if "default" feature exists, use only that
+/// 3. Otherwise, use no features to ensure compilation succeeds
+fn select_safe_features(all_features: &[String]) -> Vec<String> {
+	if all_features.contains(&"full".to_string()) {
+		vec!["full".to_string()]
+	} else if all_features.contains(&"default".to_string()) {
+		vec!["default".to_string()]
+	} else {
+		// Empty features - safest option for crates with potentially conflicting features
+		vec![]
+	}
+}
+
 #[derive(Debug, Clone)]
 pub struct EmbedOperation {
 	pub status: EmbedStatus,
@@ -158,10 +178,20 @@ impl Backend {
 				}
 				res = async {
 					// fetch all available features for the crate
-					let features = get_crate_features(&crate_name, Some(&version_clone))
+					let all_features = get_crate_features(&crate_name, Some(&version_clone))
 						.await
 						.tap_err(|e| error!("Warning: Could not fetch features for {} v{}: {}", crate_name, version_clone, e))
 						.unwrap_or_default();
+
+					// Select appropriate features to avoid mutually exclusive conflicts
+					let features = select_safe_features(&all_features);
+					tracing::info!(
+						"Selected features for {} v{}: {:?} (from {} available features)",
+						crate_name,
+						version_clone,
+						features,
+						all_features.len()
+					);
 
 					// generate documentation and embed it directly
 					generate_and_embed_docs(
@@ -380,5 +410,52 @@ impl ServerHandler for Backend {
 		_context: RequestContext<RoleServer>,
 	) -> Result<InitializeResult, McpError> {
 		Ok(self.get_info())
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_select_safe_features_with_full() {
+		let features = vec![
+			"default".to_string(),
+			"full".to_string(),
+			"runtime-tokio".to_string(),
+			"runtime-async-std".to_string(),
+		];
+		let selected = select_safe_features(&features);
+		assert_eq!(selected, vec!["full".to_string()]);
+	}
+
+	#[test]
+	fn test_select_safe_features_with_default_only() {
+		let features = vec![
+			"default".to_string(),
+			"runtime-tokio".to_string(),
+			"runtime-async-std".to_string(),
+		];
+		let selected = select_safe_features(&features);
+		assert_eq!(selected, vec!["default".to_string()]);
+	}
+
+	#[test]
+	fn test_select_safe_features_with_neither() {
+		let features = vec![
+			"runtime-tokio".to_string(),
+			"runtime-async-std".to_string(),
+			"tls-rustls".to_string(),
+			"tls-openssl".to_string(),
+		];
+		let selected = select_safe_features(&features);
+		assert_eq!(selected, Vec::<String>::new());
+	}
+
+	#[test]
+	fn test_select_safe_features_empty() {
+		let features = vec![];
+		let selected = select_safe_features(&features);
+		assert_eq!(selected, Vec::<String>::new());
 	}
 }

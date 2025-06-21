@@ -16,7 +16,7 @@ This MCP server enables AI assistants to search and understand Rust crate docume
 - **Automatic Documentation Generation**: Builds Rust documentation in JSON format using cargo's nightly toolchain
 - **Semantic Search**: Query documentation using natural language through vector embeddings
 - **Version Management**: Each crate version is stored separately for precise version-specific searches
-- **Feature Support**: Automatically detects and includes all available crate features during documentation generation
+- **Feature Support**: Intelligently selects compatible features to avoid mutually exclusive conflicts
 - **Async Operations**: Long-running embedding tasks are handled asynchronously with status tracking
 
 ## Prerequisites
@@ -150,7 +150,10 @@ List all crates and versions that have been embedded.
 1. **Documentation Generation** (`docs_builder.rs`)
 
    - Creates a temporary Cargo project
-   - Adds target crate as dependency with all features
+   - Adds target crate as dependency with intelligently selected features:
+     - Uses "full" feature if available (typically includes all compatible features)
+     - Falls back to "default" feature if "full" doesn't exist
+     - Uses no features if neither exists (to avoid mutually exclusive conflicts)
    - Runs `cargo +nightly doc --output-format=json`
 
 2. **JSON Processing** (`doc_loader.rs`, `json_types.rs`)
@@ -193,3 +196,4 @@ The `QueryService` (`query.rs`) handles:
 - Requires Rust nightly for JSON documentation output
 - OpenAI API costs for embedding generation
 - Storage requirements grow with number of embedded crates
+- May not document all features if a crate has mutually exclusive features (defaults to "full" or "default" feature)

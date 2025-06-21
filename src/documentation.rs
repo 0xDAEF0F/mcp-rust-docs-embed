@@ -13,7 +13,11 @@ pub async fn generate_and_embed_docs(
 	info!(
 		"Generating documentation for crate: {crate_name} (version: {version}) with \
 		 features: [{}]",
-		features.join(", ")
+		if features.is_empty() {
+			"no features".to_string()
+		} else {
+			features.join(", ")
+		}
 	);
 
 	// Generate docs and get both the documents and resolved version
