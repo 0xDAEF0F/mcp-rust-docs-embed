@@ -85,8 +85,13 @@ pub fn create_doc_items_with_source(
 
 		// Extract the relevant code using the line range
 		// Line numbers in the JSON are 1-based
-		let start_line = (span.begin.0 as usize).saturating_sub(1);
+		let mut start_line = (span.begin.0 as usize).saturating_sub(1);
 		let end_line = (span.end.0 as usize).min(lines.len());
+		
+		// For struct/enum/constant/function items, include any preceding attributes
+		if matches!(item_type, ItemType::Struct | ItemType::Enum | ItemType::Constant | ItemType::Function) {
+			start_line = find_start_line_with_attributes(&lines, start_line);
+		}
 
 		if start_line >= lines.len() {
 			tracing::warn!(
@@ -103,6 +108,11 @@ pub fn create_doc_items_with_source(
 		let code_lines = &lines[start_line..end_line];
 		let source_code = code_lines.join("\n");
 
+		// Skip derive attribute Impl items (they'll be bundled with their target items)
+		if item_type == ItemType::Impl && source_code.trim_start().starts_with("#[") {
+			continue;
+		}
+
 		// Skip functions that are part of impl blocks by checking for self parameter
 		if item_type == ItemType::Function && is_impl_function(&source_code) {
 			continue;
@@ -118,6 +128,28 @@ pub fn create_doc_items_with_source(
 	}
 
 	Ok(doc_items)
+}
+
+/// Finds the start line that includes any preceding attributes for an item
+/// Returns the adjusted start line index (0-based) that includes all attributes
+fn find_start_line_with_attributes(lines: &[&str], item_start_line: usize) -> usize {
+	let mut current_line = item_start_line;
+	
+	// Look backwards for attributes and empty lines
+	while current_line > 0 {
+		let prev_line_idx = current_line - 1;
+		let prev_line = lines[prev_line_idx].trim();
+		
+		if prev_line.starts_with("#[") || prev_line.is_empty() {
+			// Include attributes and empty lines
+			current_line = prev_line_idx;
+		} else {
+			// Hit a non-empty, non-attribute line, stop looking
+			break;
+		}
+	}
+	
+	current_line
 }
 
 /// Checks if a function is part of an impl block by looking for self parameter
@@ -210,5 +242,51 @@ mod tests {
 		assert!(!is_impl_function(
 			"fn foo<T>(x: &T, y: &T) -> bool { x == y }"
 		));
+	}
+
+	#[test]
+	fn test_find_start_line_with_attributes() {
+		// Test case 1: No attributes
+		let lines = vec!["fn foo() {}", "    42", "}"];
+		assert_eq!(find_start_line_with_attributes(&lines, 0), 0);
+
+		// Test case 2: Single attribute
+		let lines = vec!["#[derive(Debug)]", "struct Foo {", "    x: i32,", "}"];
+		assert_eq!(find_start_line_with_attributes(&lines, 1), 0);
+
+		// Test case 3: Multiple attributes
+		let lines = vec![
+			"#[derive(Debug)]",
+			"#[serde(rename_all = \"camelCase\")]",
+			"struct Foo {",
+			"    x: i32,",
+			"}",
+		];
+		assert_eq!(find_start_line_with_attributes(&lines, 2), 0);
+
+		// Test case 4: Attributes with empty lines
+		let lines = vec![
+			"#[derive(Debug)]",
+			"#[serde(rename_all = \"camelCase\")]",
+			"",
+			"struct Foo {",
+			"    x: i32,",
+			"}",
+		];
+		assert_eq!(find_start_line_with_attributes(&lines, 3), 0);
+
+		// Test case 5: Mixed content - should stop at non-attribute
+		let lines = vec![
+			"use std::fmt;",
+			"#[derive(Debug)]",
+			"struct Foo {",
+			"    x: i32,",
+			"}",
+		];
+		assert_eq!(find_start_line_with_attributes(&lines, 2), 1);
+
+		// Test case 6: Edge case - first line (no preceding lines)
+		let lines = vec!["struct Foo {", "    x: i32,", "}"];
+		assert_eq!(find_start_line_with_attributes(&lines, 0), 0);
 	}
 }
