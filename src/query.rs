@@ -1,7 +1,7 @@
 use crate::data_store::DataStore;
 use anyhow::{Context, Result};
 use async_openai::{Client, config::OpenAIConfig, types::CreateEmbeddingRequestArgs};
-use thin_logger::log;
+use tracing::info;
 
 pub struct QueryService {
 	client: Client<OpenAIConfig>,
@@ -25,7 +25,7 @@ impl QueryService {
 		version: &str,
 		limit: u64,
 	) -> Result<Vec<(f32, String)>> {
-		log::info!("querying for: {query}");
+		info!("querying for: {query}");
 
 		let data_store = DataStore::try_new(crate_name, version).await?;
 		let q_vec = self.embed_query(query).await?;
@@ -33,11 +33,11 @@ impl QueryService {
 		let results = data_store.query_with_content(q_vec, limit).await?;
 
 		if results.is_empty() {
-			log::info!("no results found for query: {query}");
+			info!("no results found for query: {query}");
 			return Ok(vec![]);
 		}
 
-		log::info!("found {} results for query: {}", results.len(), query);
+		info!("found {} results for query: {}", results.len(), query);
 		Ok(results)
 	}
 

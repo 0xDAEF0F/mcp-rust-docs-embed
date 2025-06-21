@@ -1,9 +1,8 @@
-#![allow(clippy::uninlined_format_args)]
-
 use crate::backend::Backend;
 use anyhow::Result;
 use rmcp::transport::sse_server::{SseServer, SseServerConfig};
 use tokio_util::sync::CancellationToken;
+use tracing::Level;
 use tracing_subscriber::{self, EnvFilter};
 
 pub mod backend;
@@ -24,11 +23,7 @@ async fn main() -> Result<()> {
 	dotenvy::dotenv_override().ok();
 
 	tracing_subscriber::fmt()
-		.with_env_filter(
-			EnvFilter::from_default_env()
-				.add_directive(tracing::Level::DEBUG.into())
-				.add_directive("html5ever=off".parse().unwrap()),
-		)
+		.with_env_filter(EnvFilter::from_default_env().add_directive(Level::DEBUG.into()))
 		.with_writer(std::io::stderr)
 		.with_ansi(false)
 		.init();
@@ -67,7 +62,7 @@ async fn main() -> Result<()> {
 	let server_ct = sse_server.config.ct.clone();
 	let ct = sse_server.with_service(move || Backend::new(server_ct.clone()));
 
-	tracing::info!("Server running at http://{}/sse", server_address);
+	tracing::info!("Server running at http://{server_address}");
 
 	tokio::signal::ctrl_c().await?;
 	ct.cancel();
