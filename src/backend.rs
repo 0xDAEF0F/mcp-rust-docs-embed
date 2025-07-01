@@ -15,10 +15,8 @@ use rmcp::{
 };
 use serde::Deserialize;
 use std::{collections::HashMap, sync::Arc};
-use tap::TapFallible;
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
-use tracing::error;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct GenDocsRequest {
@@ -39,6 +37,8 @@ pub struct EmbedRequest {
 	#[serde(default = "default_version")]
 	#[schemars(description = "Crate version (defaults to *, i.e., latest)")]
 	pub version: String,
+	#[schemars(description = "Features to enable for documentation generation")]
+	pub features: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -61,33 +61,21 @@ pub struct StatusRequest {
 	pub operation_id: String,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct FeaturesRequest {
+	#[schemars(description = "Crate name to query features for")]
+	pub crate_name: String,
+	#[serde(default = "default_version")]
+	#[schemars(description = "Crate version (defaults to *, i.e., latest)")]
+	pub version: String,
+}
+
 fn default_version() -> String {
 	"*".to_string()
 }
 
 fn default_limit() -> u64 {
 	10
-}
-
-/// Selects safe features to avoid mutually exclusive conflicts.
-///
-/// Many Rust crates have mutually exclusive features that cause compile errors
-/// when enabled together (e.g., runtime-tokio vs runtime-async-std).
-///
-/// This function implements a safe strategy:
-/// 1. If "full" feature exists, use only that (it typically includes all compatible
-///    features)
-/// 2. Otherwise, if "default" feature exists, use only that
-/// 3. Otherwise, use no features to ensure compilation succeeds
-fn select_safe_features(all_features: &[String]) -> Vec<String> {
-	if all_features.contains(&"full".to_string()) {
-		vec!["full".to_string()]
-	} else if all_features.contains(&"default".to_string()) {
-		vec!["default".to_string()]
-	} else {
-		// Empty features - safest option for crates with potentially conflicting features
-		vec![]
-	}
 }
 
 #[derive(Debug, Clone)]
@@ -139,6 +127,34 @@ impl Backend {
 			req.version.clone()
 		};
 
+		// validate features against available features for the crate
+		let available_features = get_crate_features(&req.crate_name, Some(&version))
+			.await
+			.map_err(|e| {
+				McpError::invalid_request(
+					format!("Failed to fetch available features: {}", e),
+					None,
+				)
+			})?;
+
+		// check if all requested features are valid
+		let invalid_features: Vec<_> = req
+			.features
+			.iter()
+			.filter(|f| !available_features.contains(f))
+			.cloned()
+			.collect();
+
+		if !invalid_features.is_empty() {
+			return Err(McpError::invalid_request(
+				format!(
+					"Invalid features for {} v{}: {:?}. Available features: {:?}",
+					req.crate_name, version, invalid_features, available_features
+				),
+				None,
+			));
+		}
+
 		// check if this version is already embedded
 		let table_name = gen_table_name(&req.crate_name, &version);
 
@@ -171,6 +187,7 @@ impl Backend {
 		let op_id_clone = operation_id.clone();
 		let crate_name = req.crate_name.clone();
 		let version_clone = version.clone();
+		let features = req.features.clone();
 
 		tokio::spawn(async move {
 			let result = tokio::select! {
@@ -178,22 +195,6 @@ impl Backend {
 					Err(anyhow::anyhow!("Operation cancelled"))
 				}
 				res = async {
-					// fetch all available features for the crate
-					let all_features = get_crate_features(&crate_name, Some(&version_clone))
-						.await
-						.tap_err(|e| error!("Warning: Could not fetch features for {} v{}: {}", crate_name, version_clone, e))
-						.unwrap_or_default();
-
-					// Select appropriate features to avoid mutually exclusive conflicts
-					let features = select_safe_features(&all_features);
-					tracing::info!(
-						"Selected features for {} v{}: {:?} (from {} available features)",
-						crate_name,
-						version_clone,
-						features,
-						all_features.len()
-					);
-
 					// generate documentation and embed it directly
 					generate_and_embed_docs(
 						&crate_name,
@@ -387,6 +388,45 @@ impl Backend {
 
 		Ok(CallToolResult::success(vec![Content::text(json_output)]))
 	}
+
+	#[tool(description = "Query available features for a specific crate and version")]
+	async fn query_features(
+		&self,
+		#[tool(aggr)] req: FeaturesRequest,
+	) -> Result<CallToolResult, McpError> {
+		let version = if req.version.is_empty() || req.version == "*" {
+			match resolve_latest_crate_version(&req.crate_name).await {
+				Ok(v) => v,
+				Err(_) => {
+					return Err(BackendError::VersionResolutionFailed(
+						req.crate_name.clone(),
+					)
+					.into());
+				}
+			}
+		} else {
+			req.version.clone()
+		};
+
+		let features = get_crate_features(&req.crate_name, Some(&version))
+			.await
+			.map_err(|e| {
+				McpError::invalid_request(
+					format!("Failed to fetch features: {}", e),
+					None,
+				)
+			})?;
+
+		let feature_count = features.len();
+		let features_json = serde_json::to_string_pretty(&features)
+			.context("failed to serialize features")
+			.map_err(BackendError::Internal)?;
+
+		Ok(CallToolResult::success(vec![Content::text(format!(
+			"Features for {} v{} ({} total):\n{}",
+			req.crate_name, version, feature_count, features_json
+		))]))
+	}
 }
 
 #[tool(tool_box)]
@@ -411,52 +451,5 @@ impl ServerHandler for Backend {
 		_context: RequestContext<RoleServer>,
 	) -> Result<InitializeResult, McpError> {
 		Ok(self.get_info())
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-
-	#[test]
-	fn test_select_safe_features_with_full() {
-		let features = vec![
-			"default".to_string(),
-			"full".to_string(),
-			"runtime-tokio".to_string(),
-			"runtime-async-std".to_string(),
-		];
-		let selected = select_safe_features(&features);
-		assert_eq!(selected, vec!["full".to_string()]);
-	}
-
-	#[test]
-	fn test_select_safe_features_with_default_only() {
-		let features = vec![
-			"default".to_string(),
-			"runtime-tokio".to_string(),
-			"runtime-async-std".to_string(),
-		];
-		let selected = select_safe_features(&features);
-		assert_eq!(selected, vec!["default".to_string()]);
-	}
-
-	#[test]
-	fn test_select_safe_features_with_neither() {
-		let features = vec![
-			"runtime-tokio".to_string(),
-			"runtime-async-std".to_string(),
-			"tls-rustls".to_string(),
-			"tls-openssl".to_string(),
-		];
-		let selected = select_safe_features(&features);
-		assert_eq!(selected, Vec::<String>::new());
-	}
-
-	#[test]
-	fn test_select_safe_features_empty() {
-		let features = vec![];
-		let selected = select_safe_features(&features);
-		assert_eq!(selected, Vec::<String>::new());
 	}
 }
