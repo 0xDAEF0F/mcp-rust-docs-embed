@@ -28,18 +28,27 @@ pub async fn generate_and_embed_docs(
 	info!("Loaded {} documentation items", doc_items.len());
 	info!("Resolved version: {resolved_version}");
 
-	// Create or reset data store
-	let data_store = DataStore::try_new(crate_name, &resolved_version).await?;
+	// Create or reset data store with features
+	let data_store = DataStore::try_new_with_features(
+		crate_name,
+		&resolved_version,
+		features.to_vec(),
+	)
+	.await?;
 	data_store.reset().await?;
 
 	// Create chunks from doc items with actual source code
 	let chunks: Vec<String> = doc_items.iter().map(|item| item.to_string()).collect();
-	info!("Created {} chunks for embedding", chunks.len());
+	let doc_count = chunks.len();
+	info!("Created {} chunks for embedding", doc_count);
 
 	// Embed chunks
 	embed_chunks(&data_store, chunks).await?;
 
-	info!("Documentation generation and embedding complete");
+	// Store metadata about this embedding
+	data_store.store_metadata(doc_count).await?;
+
+	info!("Documentation generation and embedding complete with metadata");
 
 	Ok(())
 }

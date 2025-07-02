@@ -1,5 +1,6 @@
 use crate::{config::EmbeddingConfig, utils::gen_table_name};
 use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
 use qdrant_client::{
 	Payload, Qdrant,
 	qdrant::{
@@ -7,17 +8,39 @@ use qdrant_client::{
 		UpsertPointsBuilder, VectorParamsBuilder,
 	},
 };
+use serde::{Deserialize, Serialize};
 use serde_json::json;
+
+/// Metadata stored with each embedding collection
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmbeddingMetadata {
+	pub crate_name: String,
+	pub version: String,
+	pub features: Vec<String>,
+	pub embedded_at: DateTime<Utc>,
+	pub embedding_model: String,
+	pub doc_count: usize,
+}
 
 pub struct DataStore {
 	pub qdrant_client: Qdrant,
 	crate_name: String,
 	version: String,
+	features: Vec<String>,
 }
 
 impl DataStore {
 	/// Initialize a new data store with Qdrant
 	pub async fn try_new(crate_name: &str, version: &str) -> Result<Self> {
+		Self::try_new_with_features(crate_name, version, vec![]).await
+	}
+
+	/// Initialize a new data store with Qdrant and features
+	pub async fn try_new_with_features(
+		crate_name: &str,
+		version: &str,
+		features: Vec<String>,
+	) -> Result<Self> {
 		let qdrant_url = dotenvy::var("QDRANT_URL").context("QDRANT_URL not set")?;
 		let qdrant_api_key = dotenvy::var("QDRANT_API_KEY").ok();
 
@@ -46,6 +69,7 @@ impl DataStore {
 			qdrant_client,
 			crate_name: crate_name.to_string(),
 			version: version.to_string(),
+			features,
 		})
 	}
 
@@ -123,5 +147,60 @@ impl DataStore {
 		}
 
 		Ok(results)
+	}
+
+	/// Store metadata for the collection
+	pub async fn store_metadata(&self, doc_count: usize) -> Result<()> {
+		let metadata = EmbeddingMetadata {
+			crate_name: self.crate_name.clone(),
+			version: self.version.clone(),
+			features: self.features.clone(),
+			embedded_at: Utc::now(),
+			embedding_model: "text-embedding-3-small".to_string(),
+			doc_count,
+		};
+
+		// Store metadata as a special point with ID 0
+		let payload = Payload::try_from(json!({
+			"metadata": serde_json::to_value(&metadata)?,
+			"is_metadata": true
+		}))?;
+
+		let collection_name = gen_table_name(&self.crate_name, &self.version);
+		let points = vec![PointStruct::new(0, vec![0.0; 1536], payload)];
+		let req = UpsertPointsBuilder::new(&collection_name, points);
+		self.qdrant_client.upsert_points(req).await?;
+
+		Ok(())
+	}
+
+	/// Retrieve metadata for a collection
+	pub async fn get_metadata(
+		qdrant_client: &Qdrant,
+		crate_name: &str,
+		version: &str,
+	) -> Result<Option<EmbeddingMetadata>> {
+		use qdrant_client::qdrant::GetPointsBuilder;
+
+		let collection_name = gen_table_name(crate_name, version);
+
+		// Try to get the metadata point (ID 0)
+		let get_points = GetPointsBuilder::new(&collection_name, vec![0.into()])
+			.with_payload(true)
+			.build();
+
+		match qdrant_client.get_points(get_points).await {
+			Ok(response) => {
+				if let Some(point) = response.result.first() {
+					if let Some(metadata_value) = point.payload.get("metadata") {
+						let metadata: EmbeddingMetadata =
+							serde_json::from_value(metadata_value.clone().into())?;
+						return Ok(Some(metadata));
+					}
+				}
+				Ok(None)
+			}
+			Err(_) => Ok(None),
+		}
 	}
 }

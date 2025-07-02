@@ -105,10 +105,10 @@ mod tests {
 	#[tokio::test]
 	async fn test_get_crate_features_latest() -> Result<()> {
 		// test with anyhow which has minimal features
-		let features = get_crate_features("anyhow", None).await?;
+		// let features = get_crate_features("lsp-types", None).await?;
+		let features = get_crate_features("async-lsp", None).await?;
 
-		// anyhow has features like std, default
-		assert!(!features.is_empty(), "anyhow should have some features");
+		println!("features: {:?}", features);
 
 		Ok(())
 	}

@@ -13,10 +13,11 @@ use rmcp::{
 	service::RequestContext,
 	tool,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct GenDocsRequest {
@@ -37,6 +38,7 @@ pub struct EmbedRequest {
 	#[serde(default = "default_version")]
 	#[schemars(description = "Crate version (defaults to *, i.e., latest)")]
 	pub version: String,
+	#[serde(default)]
 	#[schemars(description = "Features to enable for documentation generation")]
 	pub features: Vec<String>,
 }
@@ -51,7 +53,7 @@ pub struct QueryRequest {
 	#[schemars(description = "Crate version (defaults to *, i.e., latest)")]
 	pub version: String,
 	#[serde(default = "default_limit")]
-	#[schemars(description = "Number of results to return (defaults to 5)")]
+	#[schemars(description = "Number of results to return (defaults to 10)")]
 	pub limit: u64,
 }
 
@@ -109,11 +111,11 @@ impl Backend {
 	}
 
 	#[tool(description = "Generate and embed documentation for a given crate")]
-	async fn embed_docs(
+	async fn embed_crate(
 		&self,
 		#[tool(aggr)] req: EmbedRequest,
 	) -> Result<CallToolResult, McpError> {
-		let operation_id = format!("embed_{}_{}", req.crate_name, uuid::Uuid::new_v4());
+		let operation_id = format!("embed_{}_{}", req.crate_name, Uuid::new_v4());
 		let ops = self.embed_operations.clone();
 		let ct = self.cancellation_token.child_token();
 
@@ -155,19 +157,58 @@ impl Backend {
 			));
 		}
 
-		// check if this version is already embedded
+		// check if this version is already embedded with the same features
 		let table_name = gen_table_name(&req.crate_name, &version);
 
 		if let Ok(qdrant_url) = dotenvy::var("QDRANT_URL")
-			&& let Ok(qdrant_client) =
-				qdrant_client::Qdrant::from_url(&qdrant_url).build()
-			&& let Ok(exists) = qdrant_client.collection_exists(&table_name).await
+			&& let Ok(qdrant_client) = qdrant_client::Qdrant::from_url(&qdrant_url)
+				.api_key(dotenvy::var("QDRANT_API_KEY").ok())
+				.build() && let Ok(exists) = qdrant_client.collection_exists(&table_name).await
 			&& exists
 		{
-			return Ok(CallToolResult::success(vec![Content::text(format!(
-				"Documentation for {} v{} is already embedded",
-				req.crate_name, version
-			))]));
+			// Check if the existing embedding has the same features
+			if let Ok(Some(metadata)) = crate::data_store::DataStore::get_metadata(
+				&qdrant_client,
+				&req.crate_name,
+				&version,
+			)
+			.await
+			{
+				let mut existing_features = metadata.features.clone();
+				let mut requested_features = req.features.clone();
+				existing_features.sort();
+				requested_features.sort();
+
+				if existing_features == requested_features {
+					return Ok(CallToolResult::success(vec![Content::text(format!(
+						"Documentation for {} v{} is already embedded with features: \
+						 {:?}",
+						req.crate_name, version, existing_features
+					))]));
+				} else {
+					return Err(McpError::invalid_request(
+						format!(
+							"Documentation for {} v{} already exists with different \
+							 features. Existing: {:?}, Requested: {:?}. Delete the \
+							 existing collection first if you want to re-embed with \
+							 different features.",
+							req.crate_name,
+							version,
+							existing_features,
+							requested_features
+						),
+						None,
+					));
+				}
+			} else {
+				// No metadata found, this is likely an old embedding without feature
+				// tracking
+				return Ok(CallToolResult::success(vec![Content::text(format!(
+					"Documentation for {} v{} is already embedded (legacy embedding \
+					 without feature tracking)",
+					req.crate_name, version
+				))]));
+			}
 		}
 
 		{
@@ -253,11 +294,13 @@ impl Backend {
 			req.version
 		};
 
-		// check if embeddings exist for this crate/version
+		// check if embeddings exist for this crate/version and get metadata
 		let table_name = gen_table_name(&req.crate_name, &version);
+		let mut features_info = None;
 		if let Ok(qdrant_url) = dotenvy::var("QDRANT_URL")
-			&& let Ok(qdrant_client) =
-				qdrant_client::Qdrant::from_url(&qdrant_url).build()
+			&& let Ok(qdrant_client) = qdrant_client::Qdrant::from_url(&qdrant_url)
+				.api_key(dotenvy::var("QDRANT_API_KEY").ok())
+				.build()
 		{
 			match qdrant_client.collection_exists(&table_name).await {
 				Ok(exists) => {
@@ -267,6 +310,17 @@ impl Backend {
 							version: version.clone(),
 						}
 						.into());
+					}
+					// get metadata to show features
+					if let Ok(Some(metadata)) =
+						crate::data_store::DataStore::get_metadata(
+							&qdrant_client,
+							&req.crate_name,
+							&version,
+						)
+						.await
+					{
+						features_info = Some(metadata.features);
 					}
 				}
 				Err(_) => {
@@ -289,11 +343,26 @@ impl Backend {
 			return Err(BackendError::NoQueryResults(req.query.clone()).into());
 		}
 
-		let mut contents = vec![Content::text(format!(
-			"Found {} results for query: {}",
-			results.len(),
-			req.query
-		))];
+		let header = if let Some(features) = features_info {
+			format!(
+				"Found {} results for query: {} (from {} v{} with features: [{}])",
+				results.len(),
+				req.query,
+				req.crate_name,
+				version,
+				features.join(", ")
+			)
+		} else {
+			format!(
+				"Found {} results for query: {} (from {} v{})",
+				results.len(),
+				req.query,
+				req.crate_name,
+				version
+			)
+		};
+
+		let mut contents = vec![Content::text(header)];
 
 		for (i, (score, content)) in results.iter().enumerate() {
 			contents.push(Content::text(format!(
@@ -308,7 +377,7 @@ impl Backend {
 	}
 
 	#[tool(description = "Check the status of an embedding operation")]
-	async fn check_embed_status(
+	async fn query_embed_status(
 		&self,
 		#[tool(aggr)] req: StatusRequest,
 	) -> Result<CallToolResult, McpError> {
@@ -336,11 +405,19 @@ impl Backend {
 	}
 
 	#[tool(
-		description = "List all the crates and versions that are already embedded in \
-		               the mcp server"
+		description = "List the crates and its versions/features that are already \
+		               embedded in the mcp server"
 	)]
 	async fn list_embedded_crates(&self) -> Result<CallToolResult, McpError> {
-		let mut crate_versions: HashMap<String, Vec<String>> = HashMap::new();
+		#[derive(Serialize)]
+		struct CrateVersionInfo {
+			version: String,
+			features: Option<Vec<String>>,
+			embedded_at: Option<String>,
+			doc_count: Option<usize>,
+		}
+
+		let mut crate_info: HashMap<String, Vec<CrateVersionInfo>> = HashMap::new();
 
 		let qdrant_url = dotenvy::var("QDRANT_URL")
 			.context("QDRANT_URL environment variable not set")
@@ -373,24 +450,50 @@ impl Backend {
 				let crate_name = crate_name.replace('_', "-");
 				let version = version.replace('_', ".");
 
-				crate_versions.entry(crate_name).or_default().push(version);
+				// Try to get metadata for this collection
+				let metadata = crate::data_store::DataStore::get_metadata(
+					&qdrant_client,
+					&crate_name,
+					&version,
+				)
+				.await
+				.ok()
+				.flatten();
+
+				let info = if let Some(meta) = metadata {
+					CrateVersionInfo {
+						version: version.clone(),
+						features: Some(meta.features),
+						embedded_at: Some(meta.embedded_at.to_rfc3339()),
+						doc_count: Some(meta.doc_count),
+					}
+				} else {
+					CrateVersionInfo {
+						version: version.clone(),
+						features: None,
+						embedded_at: None,
+						doc_count: None,
+					}
+				};
+
+				crate_info.entry(crate_name).or_default().push(info);
 			}
 		}
 
 		// sort versions for each crate
-		for versions in crate_versions.values_mut() {
-			versions.sort();
+		for versions in crate_info.values_mut() {
+			versions.sort_by(|a, b| a.version.cmp(&b.version));
 		}
 
-		let json_output = serde_json::to_string_pretty(&crate_versions)
-			.context("failed to serialize crate versions")
+		let json_output = serde_json::to_string_pretty(&crate_info)
+			.context("failed to serialize crate info")
 			.map_err(BackendError::Internal)?;
 
 		Ok(CallToolResult::success(vec![Content::text(json_output)]))
 	}
 
 	#[tool(description = "Query available features for a specific crate and version")]
-	async fn query_features(
+	async fn query_crate_features(
 		&self,
 		#[tool(aggr)] req: FeaturesRequest,
 	) -> Result<CallToolResult, McpError> {
@@ -436,7 +539,7 @@ impl ServerHandler for Backend {
 			protocol_version: ProtocolVersion::V_2024_11_05,
 			capabilities: ServerCapabilities::builder().enable_tools().build(),
 			server_info: Implementation {
-				name: "embed-anything-rs".to_string(),
+				name: "mcp-rust-docs-embed".to_string(),
 				version: "0.1.0".to_string(),
 			},
 			instructions: Some(

@@ -27,10 +27,11 @@ rmcp = { git = "https://github.com/modelcontextprotocol/rust-sdk", branch = "mai
 ] }
 schemars = "0.8"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "std", "fmt"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "std", "fmt", "chrono"] }
 futures = "0.3"
 axum = { version = "0.8", features = ["macros"] }
 tokio-util = "0.7.15"
 reqwest = { version = "0.12", features = ["json"] }
 tap = "1.0.1"
 async-openai = "0.28.3"
+colored = "3.0.0"

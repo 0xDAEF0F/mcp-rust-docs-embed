@@ -1,4 +1,4 @@
-use crate::backend::Backend;
+use crate::{backend::Backend, logging::CustomFormatter};
 use anyhow::Result;
 use rmcp::transport::sse_server::{SseServer, SseServerConfig};
 use tokio_util::sync::CancellationToken;
@@ -14,6 +14,7 @@ pub mod documentation;
 pub mod error;
 pub mod features;
 pub mod json_types;
+pub mod logging;
 pub mod my_types;
 pub mod query;
 pub mod utils;
@@ -23,14 +24,14 @@ async fn main() -> Result<()> {
 	dotenvy::dotenv_override().ok();
 
 	tracing_subscriber::fmt()
+		.event_format(CustomFormatter)
 		.with_env_filter(EnvFilter::from_default_env().add_directive(Level::DEBUG.into()))
 		.with_writer(std::io::stderr)
-		.with_ansi(false)
 		.init();
 
 	tracing::info!("Starting MCP SSE server");
 
-	let port = std::env::var("PORT").unwrap_or_else(|_| "8080".to_string());
+	let port = std::env::var("PORT").unwrap_or("8080".to_string());
 	let bind_addr = format!("0.0.0.0:{port}");
 
 	let config = SseServerConfig {
