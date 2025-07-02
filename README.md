@@ -16,7 +16,7 @@ This MCP server enables AI assistants to search and understand Rust crate docume
 - **Automatic Documentation Generation**: Builds Rust documentation in JSON format using cargo's nightly toolchain
 - **Semantic Search**: Query documentation using natural language through vector embeddings
 - **Version Management**: Each crate version is stored separately for precise version-specific searches
-- **Feature Support**: Intelligently selects compatible features to avoid mutually exclusive conflicts
+- **Feature Support**: Validates requested features against available crate features and tracks which features were used for embeddings
 - **Async Operations**: Long-running embedding tasks are handled asynchronously with status tracking
 
 ## Prerequisites
@@ -90,15 +90,15 @@ For local development, replace the URL with your local server:
 
 ### Available MCP Tools
 
-#### 1. `embed_docs`
+#### 1. `embed_crate`
 
 Generate and embed documentation for a Rust crate.
 
 Parameters:
 
 - `crate_name` (required): Name of the crate to document
-- `version` (optional): Version to embed (defaults to latest)
-- `features` (optional): List of features to enable
+- `version` (optional): Version to embed (defaults to `*`, i.e., latest)
+- `features` (optional): List of features to enable (validated against available features)
 
 Example:
 
@@ -109,6 +109,8 @@ Example:
   "features": ["full"]
 }
 ```
+
+Note: The server validates requested features against available crate features and prevents re-embedding with different features unless the existing collection is deleted first.
 
 #### 2. `query_embeddings`
 
@@ -131,17 +133,35 @@ Example:
 }
 ```
 
-#### 3. `check_embed_status`
+#### 3. `query_embed_status`
 
 Check the status of an ongoing embedding operation.
 
 Parameters:
 
-- `operation_id` (required): ID returned by `embed_docs`
+- `operation_id` (required): ID returned by `embed_crate`
 
 #### 4. `list_embedded_crates`
 
-List all crates and versions that have been embedded.
+List all crates and versions that have been embedded, including their features, embedding timestamp, and document count.
+
+#### 5. `query_crate_features`
+
+Query available features for a specific crate and version.
+
+Parameters:
+
+- `crate_name` (required): Name of the crate to query features for
+- `version` (optional): Version to check (defaults to `*`, i.e., latest)
+
+Example:
+
+```json
+{
+  "crate_name": "tokio",
+  "version": "1.40.0"
+}
+```
 
 ## Architecture
 
@@ -150,10 +170,8 @@ List all crates and versions that have been embedded.
 1. **Documentation Generation** (`docs_builder.rs`)
 
    - Creates a temporary Cargo project
-   - Adds target crate as dependency with intelligently selected features:
-     - Uses "full" feature if available (typically includes all compatible features)
-     - Falls back to "default" feature if "full" doesn't exist
-     - Uses no features if neither exists (to avoid mutually exclusive conflicts)
+   - Adds target crate as dependency with user-specified features (validated against available features)
+   - Validates features to prevent mutually exclusive conflicts
    - Runs `cargo +nightly doc --output-format=json`
 
 2. **JSON Processing** (`doc_loader.rs`, `json_types.rs`)
@@ -171,6 +189,7 @@ List all crates and versions that have been embedded.
    - Stores embeddings in Qdrant collections
    - Collection naming: `{crate_name}_v{version}` (normalized)
    - Includes source content for retrieval
+   - Stores metadata including features used, embedding timestamp, and document count
 
 ### Query System
 
@@ -196,4 +215,5 @@ The `QueryService` (`query.rs`) handles:
 - Requires Rust nightly for JSON documentation output
 - OpenAI API costs for embedding generation
 - Storage requirements grow with number of embedded crates
-- May not document all features if a crate has mutually exclusive features (defaults to "full" or "default" feature)
+- Feature validation prevents invalid feature combinations
+- Cannot re-embed a crate with different features without deleting the existing collection first
