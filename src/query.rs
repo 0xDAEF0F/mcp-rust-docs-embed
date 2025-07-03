@@ -41,6 +41,28 @@ impl QueryService {
 		Ok(results)
 	}
 
+	pub async fn query_embeddings_without_version(
+		&self,
+		query: &str,
+		crate_name: &str,
+		limit: u64,
+	) -> Result<Vec<(f32, String)>> {
+		info!("querying for: {query}");
+
+		let data_store = DataStore::try_new_without_version(crate_name).await?;
+		let q_vec = self.embed_query(query).await?;
+
+		let results = data_store.query_with_content(q_vec, limit).await?;
+
+		if results.is_empty() {
+			info!("no results found for query: {query}");
+			return Ok(vec![]);
+		}
+
+		info!("found {} results for query: {}", results.len(), query);
+		Ok(results)
+	}
+
 	pub async fn embed_query(&self, query: &str) -> Result<Vec<f32>> {
 		let request = CreateEmbeddingRequestArgs::default()
 			.model("text-embedding-3-small")

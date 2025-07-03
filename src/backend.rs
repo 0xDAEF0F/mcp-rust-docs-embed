@@ -1,9 +1,8 @@
 use crate::{
-	documentation::generate_and_embed_docs,
 	error::BackendError,
-	features::get_crate_features,
+	github_processor::process_and_embed_github_repo,
 	query::QueryService,
-	utils::{gen_table_name, resolve_latest_crate_version},
+	utils::{gen_table_name_without_version, resolve_crate_github_repo},
 };
 use anyhow::{Context, Result};
 use rmcp::{
@@ -23,9 +22,6 @@ use uuid::Uuid;
 pub struct GenDocsRequest {
 	#[schemars(description = "Crate name to generate docs for")]
 	pub crate_name: String,
-	#[serde(default = "default_version")]
-	#[schemars(description = "Crate version requirement (defaults to *, i.e., latest)")]
-	pub version: String,
 	#[serde(default)]
 	#[schemars(description = "Optional features to enable")]
 	pub features: Vec<String>,
@@ -35,12 +31,6 @@ pub struct GenDocsRequest {
 pub struct EmbedRequest {
 	#[schemars(description = "Crate name to embed docs for")]
 	pub crate_name: String,
-	#[serde(default = "default_version")]
-	#[schemars(description = "Crate version (defaults to *, i.e., latest)")]
-	pub version: String,
-	#[serde(default)]
-	#[schemars(description = "Features to enable for documentation generation")]
-	pub features: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -49,9 +39,6 @@ pub struct QueryRequest {
 	pub query: String,
 	#[schemars(description = "Crate name to search in")]
 	pub crate_name: String,
-	#[serde(default = "default_version")]
-	#[schemars(description = "Crate version (defaults to *, i.e., latest)")]
-	pub version: String,
 	#[serde(default = "default_limit")]
 	#[schemars(description = "Number of results to return (defaults to 10)")]
 	pub limit: u64,
@@ -63,19 +50,6 @@ pub struct StatusRequest {
 	pub operation_id: String,
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct FeaturesRequest {
-	#[schemars(description = "Crate name to query features for")]
-	pub crate_name: String,
-	#[serde(default = "default_version")]
-	#[schemars(description = "Crate version (defaults to *, i.e., latest)")]
-	pub version: String,
-}
-
-fn default_version() -> String {
-	"*".to_string()
-}
-
 fn default_limit() -> u64 {
 	10
 }
@@ -84,7 +58,7 @@ fn default_limit() -> u64 {
 pub struct EmbedOperation {
 	pub status: EmbedStatus,
 	pub crate_name: String,
-	pub version: String,
+	pub repo_url: String,
 	pub message: String,
 }
 
@@ -110,7 +84,10 @@ impl Backend {
 		}
 	}
 
-	#[tool(description = "Generate and embed documentation for a given crate")]
+	#[tool(
+		description = "Generate and embed documentation for a given crate from its \
+		               GitHub repository"
+	)]
 	async fn embed_crate(
 		&self,
 		#[tool(aggr)] req: EmbedRequest,
@@ -119,46 +96,18 @@ impl Backend {
 		let ops = self.embed_operations.clone();
 		let ct = self.cancellation_token.child_token();
 
-		let version = if req.version.is_empty() || req.version == "*" {
-			resolve_latest_crate_version(&req.crate_name)
-				.await
-				.map_err(|_| {
-					BackendError::VersionResolutionFailed(req.crate_name.clone())
-				})?
-		} else {
-			req.version.clone()
-		};
-
-		// validate features against available features for the crate
-		let available_features = get_crate_features(&req.crate_name, Some(&version))
+		// Resolve crate to GitHub repo URL
+		let repo_url = resolve_crate_github_repo(&req.crate_name, None)
 			.await
 			.map_err(|e| {
 				McpError::invalid_request(
-					format!("Failed to fetch available features: {}", e),
+					format!("Failed to resolve crate to GitHub repository: {}", e),
 					None,
 				)
 			})?;
 
-		// check if all requested features are valid
-		let invalid_features: Vec<_> = req
-			.features
-			.iter()
-			.filter(|f| !available_features.contains(f))
-			.cloned()
-			.collect();
-
-		if !invalid_features.is_empty() {
-			return Err(McpError::invalid_request(
-				format!(
-					"Invalid features for {} v{}: {:?}. Available features: {:?}",
-					req.crate_name, version, invalid_features, available_features
-				),
-				None,
-			));
-		}
-
-		// check if this version is already embedded with the same features
-		let table_name = gen_table_name(&req.crate_name, &version);
+		// Check if this repo is already embedded
+		let table_name = gen_table_name_without_version(&req.crate_name);
 
 		if let Ok(qdrant_url) = dotenvy::var("QDRANT_URL")
 			&& let Ok(qdrant_client) = qdrant_client::Qdrant::from_url(&qdrant_url)
@@ -166,49 +115,10 @@ impl Backend {
 				.build() && let Ok(exists) = qdrant_client.collection_exists(&table_name).await
 			&& exists
 		{
-			// Check if the existing embedding has the same features
-			if let Ok(Some(metadata)) = crate::data_store::DataStore::get_metadata(
-				&qdrant_client,
-				&req.crate_name,
-				&version,
-			)
-			.await
-			{
-				let mut existing_features = metadata.features.clone();
-				let mut requested_features = req.features.clone();
-				existing_features.sort();
-				requested_features.sort();
-
-				if existing_features == requested_features {
-					return Ok(CallToolResult::success(vec![Content::text(format!(
-						"Documentation for {} v{} is already embedded with features: \
-						 {:?}",
-						req.crate_name, version, existing_features
-					))]));
-				} else {
-					return Err(McpError::invalid_request(
-						format!(
-							"Documentation for {} v{} already exists with different \
-							 features. Existing: {:?}, Requested: {:?}. Delete the \
-							 existing collection first if you want to re-embed with \
-							 different features.",
-							req.crate_name,
-							version,
-							existing_features,
-							requested_features
-						),
-						None,
-					));
-				}
-			} else {
-				// No metadata found, this is likely an old embedding without feature
-				// tracking
-				return Ok(CallToolResult::success(vec![Content::text(format!(
-					"Documentation for {} v{} is already embedded (legacy embedding \
-					 without feature tracking)",
-					req.crate_name, version
-				))]));
-			}
+			return Ok(CallToolResult::success(vec![Content::text(format!(
+				"Documentation for {} is already embedded from repository: {}",
+				req.crate_name, repo_url
+			))]));
 		}
 
 		{
@@ -218,17 +128,14 @@ impl Backend {
 				EmbedOperation {
 					status: EmbedStatus::InProgress,
 					crate_name: req.crate_name.clone(),
-					version: version.clone(),
-					message: "Starting documentation generation and embedding process"
-						.to_string(),
+					repo_url: repo_url.clone(),
+					message: "Starting repository processing and embedding".to_string(),
 				},
 			);
 		}
 
 		let op_id_clone = operation_id.clone();
 		let crate_name = req.crate_name.clone();
-		let version_clone = version.clone();
-		let features = req.features.clone();
 
 		tokio::spawn(async move {
 			let result = tokio::select! {
@@ -236,12 +143,8 @@ impl Backend {
 					Err(anyhow::anyhow!("Operation cancelled"))
 				}
 				res = async {
-					// generate documentation and embed it directly
-					generate_and_embed_docs(
-						&crate_name,
-						&version_clone,
-						&features,
-					).await
+					// Process GitHub repository and embed it
+					process_and_embed_github_repo(&crate_name).await
 				} => res
 			};
 
@@ -251,23 +154,22 @@ impl Backend {
 					Ok(_) => {
 						op.status = EmbedStatus::Completed;
 						op.message = format!(
-							"Successfully generated and embedded documentation for {} \
-							 v{}",
-							op.crate_name, op.version
+							"Successfully processed and embedded repository for {}",
+							op.crate_name
 						);
 					}
 					Err(e) => {
 						op.status = EmbedStatus::Failed;
-						op.message = format!("Failed to embed docs: {}", e);
+						op.message = format!("Failed to embed repository: {}", e);
 					}
 				}
 			}
 		});
 
 		Ok(CallToolResult::success(vec![Content::text(format!(
-			"Started documentation generation and embedding process with ID: {}. Sleep \
-			 for about 6 seconds and then Use \"check_embed_status\" to monitor \
-			 progress --- do this until it either suceeds or fails.",
+			"Started repository processing and embedding with ID: {}. Sleep for about 6 \
+			 seconds and then Use \"check_embed_status\" to monitor progress --- do \
+			 this until it either succeeds or fails.",
 			operation_id
 		))]))
 	}
@@ -280,23 +182,8 @@ impl Backend {
 		&self,
 		#[tool(aggr)] req: QueryRequest,
 	) -> Result<CallToolResult, McpError> {
-		let version = if req.version.is_empty() || req.version == "*" {
-			match resolve_latest_crate_version(&req.crate_name).await {
-				Ok(v) => v,
-				Err(_) => {
-					return Err(BackendError::VersionResolutionFailed(
-						req.crate_name.clone(),
-					)
-					.into());
-				}
-			}
-		} else {
-			req.version
-		};
-
-		// check if embeddings exist for this crate/version and get metadata
-		let table_name = gen_table_name(&req.crate_name, &version);
-		let mut features_info = None;
+		// Check if embeddings exist for this crate
+		let table_name = gen_table_name_without_version(&req.crate_name);
 		if let Ok(qdrant_url) = dotenvy::var("QDRANT_URL")
 			&& let Ok(qdrant_client) = qdrant_client::Qdrant::from_url(&qdrant_url)
 				.api_key(dotenvy::var("QDRANT_API_KEY").ok())
@@ -307,20 +194,9 @@ impl Backend {
 					if !exists {
 						return Err(BackendError::NoEmbeddedDocs {
 							crate_name: req.crate_name.clone(),
-							version: version.clone(),
+							version: "repo".to_string(),
 						}
 						.into());
-					}
-					// get metadata to show features
-					if let Ok(Some(metadata)) =
-						crate::data_store::DataStore::get_metadata(
-							&qdrant_client,
-							&req.crate_name,
-							&version,
-						)
-						.await
-					{
-						features_info = Some(metadata.features);
 					}
 				}
 				Err(_) => {
@@ -334,7 +210,7 @@ impl Backend {
 			.map_err(BackendError::Internal)?;
 
 		let results = query_service
-			.query_embeddings(&req.query, &req.crate_name, &version, req.limit)
+			.query_embeddings_without_version(&req.query, &req.crate_name, req.limit)
 			.await
 			.context("failed to query embeddings")
 			.map_err(BackendError::Internal)?;
@@ -343,24 +219,12 @@ impl Backend {
 			return Err(BackendError::NoQueryResults(req.query.clone()).into());
 		}
 
-		let header = if let Some(features) = features_info {
-			format!(
-				"Found {} results for query: {} (from {} v{} with features: [{}])",
-				results.len(),
-				req.query,
-				req.crate_name,
-				version,
-				features.join(", ")
-			)
-		} else {
-			format!(
-				"Found {} results for query: {} (from {} v{})",
-				results.len(),
-				req.query,
-				req.crate_name,
-				version
-			)
-		};
+		let header = format!(
+			"Found {} results for query: {} (from {} repository)",
+			results.len(),
+			req.query,
+			req.crate_name
+		);
 
 		let mut contents = vec![Content::text(header)];
 
@@ -396,8 +260,8 @@ impl Backend {
 				};
 
 				Ok(CallToolResult::success(vec![Content::text(format!(
-					"Embed operation {} for {} v{}: {} - {}",
-					req.operation_id, op.crate_name, op.version, status_text, op.message
+					"Embed operation {} for {}: {} - {}",
+					req.operation_id, op.crate_name, status_text, op.message
 				))]))
 			}
 			None => Err(BackendError::OperationNotFound(req.operation_id.clone()).into()),
@@ -440,36 +304,34 @@ impl Backend {
 		for collection in collections.collections {
 			let name = collection.name;
 
-			// parse collection name to extract crate name and version
-			// format is: {crate_name}_v{version}
-			if let Some(v_pos) = name.rfind("_v") {
-				let crate_name = &name[..v_pos];
-				let version = &name[v_pos + 2..];
+			// parse collection name to extract crate name
+			// format is: repo_{crate_name}
+			if name.starts_with("repo_") {
+				let crate_name = &name[5..];
 
 				// convert back underscores to original characters
 				let crate_name = crate_name.replace('_', "-");
-				let version = version.replace('_', ".");
 
 				// Try to get metadata for this collection
-				let metadata = crate::data_store::DataStore::get_metadata(
-					&qdrant_client,
-					&crate_name,
-					&version,
-				)
-				.await
-				.ok()
-				.flatten();
+				let metadata =
+					crate::data_store::DataStore::get_metadata_without_version(
+						&qdrant_client,
+						&crate_name,
+					)
+					.await
+					.ok()
+					.flatten();
 
 				let info = if let Some(meta) = metadata {
 					CrateVersionInfo {
-						version: version.clone(),
-						features: Some(meta.features),
+						version: "repo".to_string(),
+						features: None,
 						embedded_at: Some(meta.embedded_at.to_rfc3339()),
 						doc_count: Some(meta.doc_count),
 					}
 				} else {
 					CrateVersionInfo {
-						version: version.clone(),
+						version: "repo".to_string(),
 						features: None,
 						embedded_at: None,
 						doc_count: None,
@@ -490,45 +352,6 @@ impl Backend {
 			.map_err(BackendError::Internal)?;
 
 		Ok(CallToolResult::success(vec![Content::text(json_output)]))
-	}
-
-	#[tool(description = "Query available features for a specific crate and version")]
-	async fn query_crate_features(
-		&self,
-		#[tool(aggr)] req: FeaturesRequest,
-	) -> Result<CallToolResult, McpError> {
-		let version = if req.version.is_empty() || req.version == "*" {
-			match resolve_latest_crate_version(&req.crate_name).await {
-				Ok(v) => v,
-				Err(_) => {
-					return Err(BackendError::VersionResolutionFailed(
-						req.crate_name.clone(),
-					)
-					.into());
-				}
-			}
-		} else {
-			req.version.clone()
-		};
-
-		let features = get_crate_features(&req.crate_name, Some(&version))
-			.await
-			.map_err(|e| {
-				McpError::invalid_request(
-					format!("Failed to fetch features: {}", e),
-					None,
-				)
-			})?;
-
-		let feature_count = features.len();
-		let features_json = serde_json::to_string_pretty(&features)
-			.context("failed to serialize features")
-			.map_err(BackendError::Internal)?;
-
-		Ok(CallToolResult::success(vec![Content::text(format!(
-			"Features for {} v{} ({} total):\n{}",
-			req.crate_name, version, feature_count, features_json
-		))]))
 	}
 }
 

@@ -35,3 +35,7 @@ reqwest = { version = "0.12", features = ["json"] }
 tap = "1.0.1"
 async-openai = "0.28.3"
 colored = "3.0.0"
+tree-sitter-rust = "0.24.0"
+tree-sitter = "0.25.6"
+url = "2.5.4"
+git2 = "0.20.2"

@@ -1,3 +1,4 @@
+pub mod chunk_repo;
 pub mod config;
 pub mod data_store;
 pub mod doc_loader;

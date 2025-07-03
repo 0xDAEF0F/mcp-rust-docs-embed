@@ -13,6 +13,7 @@ pub mod docs_builder;
 pub mod documentation;
 pub mod error;
 pub mod features;
+pub mod github_processor;
 pub mod json_types;
 pub mod logging;
 pub mod my_types;

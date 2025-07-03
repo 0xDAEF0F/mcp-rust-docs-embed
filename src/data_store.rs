@@ -1,4 +1,7 @@
-use crate::{config::EmbeddingConfig, utils::gen_table_name};
+use crate::{
+	config::EmbeddingConfig,
+	utils::{gen_table_name, gen_table_name_without_version},
+};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use qdrant_client::{
@@ -25,8 +28,9 @@ pub struct EmbeddingMetadata {
 pub struct DataStore {
 	pub qdrant_client: Qdrant,
 	crate_name: String,
-	version: String,
+	version: Option<String>,
 	features: Vec<String>,
+	is_repo_based: bool,
 }
 
 impl DataStore {
@@ -68,14 +72,54 @@ impl DataStore {
 		Ok(Self {
 			qdrant_client,
 			crate_name: crate_name.to_string(),
-			version: version.to_string(),
+			version: Some(version.to_string()),
 			features,
+			is_repo_based: false,
+		})
+	}
+
+	/// Initialize a new data store for repository-based embedding
+	pub async fn try_new_without_version(crate_name: &str) -> Result<Self> {
+		let qdrant_url = dotenvy::var("QDRANT_URL").context("QDRANT_URL not set")?;
+		let qdrant_api_key = dotenvy::var("QDRANT_API_KEY").ok();
+
+		let qdrant_client = Qdrant::from_url(&qdrant_url)
+			.api_key(qdrant_api_key)
+			.build()?;
+
+		// Generate deterministic names
+		let collection_name = gen_table_name_without_version(crate_name);
+
+		// setup qdrant collection - only create if it doesn't exist
+		let collection_exists = qdrant_client.collection_exists(&collection_name).await?;
+		if !collection_exists {
+			let embedding_config = EmbeddingConfig::default();
+			let collection = CreateCollectionBuilder::new(&collection_name)
+				.vectors_config(VectorParamsBuilder::new(
+					embedding_config.vector_size,
+					Distance::Cosine,
+				));
+
+			let res = qdrant_client.create_collection(collection).await?;
+			assert!(res.result, "collection could not be created");
+		}
+
+		Ok(Self {
+			qdrant_client,
+			crate_name: crate_name.to_string(),
+			version: None,
+			features: vec![],
+			is_repo_based: true,
 		})
 	}
 
 	/// Reset the Qdrant collection
 	pub async fn reset(&self) -> Result<()> {
-		let collection_name = gen_table_name(&self.crate_name, &self.version);
+		let collection_name = if self.is_repo_based {
+			gen_table_name_without_version(&self.crate_name)
+		} else {
+			gen_table_name(&self.crate_name, &self.version.as_ref().unwrap())
+		};
 
 		self.qdrant_client
 			.delete_collection(&collection_name)
@@ -97,7 +141,11 @@ impl DataStore {
 		content: &str,
 		vector: Vec<f32>,
 	) -> Result<u64> {
-		let collection_name = gen_table_name(&self.crate_name, &self.version);
+		let collection_name = if self.is_repo_based {
+			gen_table_name_without_version(&self.crate_name)
+		} else {
+			gen_table_name(&self.crate_name, &self.version.as_ref().unwrap())
+		};
 
 		// generate a unique id based on timestamp and random value
 		let id = std::time::SystemTime::now()
@@ -123,7 +171,11 @@ impl DataStore {
 		query_vector: Vec<f32>,
 		max_results: u64,
 	) -> Result<Vec<(f32, String)>> {
-		let collection_name = gen_table_name(&self.crate_name, &self.version);
+		let collection_name = if self.is_repo_based {
+			gen_table_name_without_version(&self.crate_name)
+		} else {
+			gen_table_name(&self.crate_name, &self.version.as_ref().unwrap())
+		};
 
 		let search_req =
 			SearchPointsBuilder::new(&collection_name, query_vector, max_results)
@@ -153,7 +205,7 @@ impl DataStore {
 	pub async fn store_metadata(&self, doc_count: usize) -> Result<()> {
 		let metadata = EmbeddingMetadata {
 			crate_name: self.crate_name.clone(),
-			version: self.version.clone(),
+			version: self.version.clone().unwrap_or_else(|| "repo".to_string()),
 			features: self.features.clone(),
 			embedded_at: Utc::now(),
 			embedding_model: "text-embedding-3-small".to_string(),
@@ -166,7 +218,11 @@ impl DataStore {
 			"is_metadata": true
 		}))?;
 
-		let collection_name = gen_table_name(&self.crate_name, &self.version);
+		let collection_name = if self.is_repo_based {
+			gen_table_name_without_version(&self.crate_name)
+		} else {
+			gen_table_name(&self.crate_name, &self.version.as_ref().unwrap())
+		};
 		let points = vec![PointStruct::new(0, vec![0.0; 1536], payload)];
 		let req = UpsertPointsBuilder::new(&collection_name, points);
 		self.qdrant_client.upsert_points(req).await?;
@@ -183,6 +239,35 @@ impl DataStore {
 		use qdrant_client::qdrant::GetPointsBuilder;
 
 		let collection_name = gen_table_name(crate_name, version);
+
+		// Try to get the metadata point (ID 0)
+		let get_points = GetPointsBuilder::new(&collection_name, vec![0.into()])
+			.with_payload(true)
+			.build();
+
+		match qdrant_client.get_points(get_points).await {
+			Ok(response) => {
+				if let Some(point) = response.result.first() {
+					if let Some(metadata_value) = point.payload.get("metadata") {
+						let metadata: EmbeddingMetadata =
+							serde_json::from_value(metadata_value.clone().into())?;
+						return Ok(Some(metadata));
+					}
+				}
+				Ok(None)
+			}
+			Err(_) => Ok(None),
+		}
+	}
+
+	/// Retrieve metadata for a repository-based collection
+	pub async fn get_metadata_without_version(
+		qdrant_client: &Qdrant,
+		crate_name: &str,
+	) -> Result<Option<EmbeddingMetadata>> {
+		use qdrant_client::qdrant::GetPointsBuilder;
+
+		let collection_name = gen_table_name_without_version(crate_name);
 
 		// Try to get the metadata point (ID 0)
 		let get_points = GetPointsBuilder::new(&collection_name, vec![0.into()])
