@@ -17,8 +17,9 @@ pub async fn process_and_embed_github_repo(crate_name: &str) -> Result<()> {
 	info!("Resolved to repository: {repo_url}");
 
 	// Process the GitHub repository using chunker_rs
-	let chunks_map =
-		process_github_repo(&repo_url).context("Failed to process GitHub repository")?;
+	let chunks_map = process_github_repo(&repo_url)
+		.await
+		.context("Failed to process GitHub repository")?;
 
 	// Flatten all chunks from all files into a single vector
 	let chunks: Vec<_> = chunks_map

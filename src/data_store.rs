@@ -174,7 +174,7 @@ impl DataStore {
 		let collection_name = if self.is_repo_based {
 			gen_table_name_without_version(&self.crate_name)
 		} else {
-			gen_table_name(&self.crate_name, &self.version.as_ref().unwrap())
+			gen_table_name(&self.crate_name, self.version.as_ref().unwrap())
 		};
 
 		let search_req =
@@ -203,6 +203,8 @@ impl DataStore {
 
 	/// Store metadata for the collection
 	pub async fn store_metadata(&self, doc_count: usize) -> Result<()> {
+		use tracing::debug;
+
 		let metadata = EmbeddingMetadata {
 			crate_name: self.crate_name.clone(),
 			version: self.version.clone().unwrap_or_else(|| "repo".to_string()),
@@ -211,6 +213,8 @@ impl DataStore {
 			embedding_model: "text-embedding-3-small".to_string(),
 			doc_count,
 		};
+
+		debug!("Storing metadata: {:?}", metadata);
 
 		// Store metadata as a special point with ID 0
 		let payload = Payload::try_from(json!({
@@ -223,6 +227,9 @@ impl DataStore {
 		} else {
 			gen_table_name(&self.crate_name, &self.version.as_ref().unwrap())
 		};
+
+		debug!("Storing metadata in collection: {}", collection_name);
+
 		let points = vec![PointStruct::new(0, vec![0.0; 1536], payload)];
 		let req = UpsertPointsBuilder::new(&collection_name, points);
 		self.qdrant_client.upsert_points(req).await?;

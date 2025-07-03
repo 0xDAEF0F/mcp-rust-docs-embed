@@ -1,15 +1,25 @@
 use anyhow::{Result, bail};
+use once_cell::sync::Lazy;
 use std::{
 	collections::{HashMap, HashSet},
 	ops::RangeInclusive,
 };
 use tempfile::TempDir;
+use tiktoken_rs::{CoreBPE, cl100k_base};
+use tracing::{info, trace};
 use tree_sitter::Node;
 use url::Url;
 use walkdir::WalkDir;
 
 /// tresitter nodes to ignore
 const NODES_TO_IGNORE: [&str; 1] = ["use_declaration"];
+
+/// Maximum token limit for chunks
+const MAX_TOKENS: usize = 8192;
+
+/// Lazy-initialized BPE tokenizer to avoid repeated initialization
+static BPE: Lazy<CoreBPE> =
+	Lazy::new(|| cl100k_base().expect("Failed to initialize tiktoken BPE"));
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Chunk {
@@ -36,8 +46,14 @@ pub enum ChunkKind {
 ///
 /// # Returns
 /// A HashMap where keys are file paths and values are vectors of chunks
-pub fn process_github_repo(repo_url: &str) -> Result<HashMap<String, Vec<Chunk>>> {
-	let temp_dir = clone_repo(repo_url)?;
+pub async fn process_github_repo(repo_url: &str) -> Result<HashMap<String, Vec<Chunk>>> {
+	let repo_url = repo_url.to_string();
+
+	// Run the blocking git clone operation in a separate thread
+	let temp_dir = tokio::task::spawn_blocking(move || clone_repo(&repo_url))
+		.await
+		.map_err(|e| anyhow::anyhow!("Failed to spawn blocking task: {}", e))??;
+
 	let mut result = HashMap::new();
 
 	// Walk through all Rust files in the repository
@@ -54,11 +70,20 @@ pub fn process_github_repo(repo_url: &str) -> Result<HashMap<String, Vec<Chunk>>
 			.to_string_lossy()
 			.to_string();
 
-		if let Ok(source) = std::fs::read_to_string(file_path)
-			&& let Ok(chunks) = extract_chunks(&source)
-			&& !chunks.is_empty()
-		{
-			result.insert(relative_path, chunks);
+		if let Ok(source) = std::fs::read_to_string(file_path) {
+			// Process chunks in a blocking context to handle sync operations
+			let chunks_result =
+				tokio::task::spawn_blocking(move || extract_chunks(&source))
+					.await
+					.map_err(|e| {
+						anyhow::anyhow!("Failed to spawn blocking task: {}", e)
+					})?;
+
+			if let Ok(chunks) = chunks_result
+				&& !chunks.is_empty()
+			{
+				result.insert(relative_path, chunks);
+			}
 		}
 	}
 
@@ -76,7 +101,12 @@ fn clone_repo(repo: &str) -> Result<TempDir> {
 	builder.fetch_options(fetch_options);
 
 	let temp_dir = TempDir::new()?;
+
+	info!("Cloning repository: {repo_url}");
+
 	builder.clone(repo_url.as_str(), temp_dir.path())?;
+
+	info!("Cloned complete");
 
 	Ok(temp_dir)
 }
@@ -93,6 +123,12 @@ fn parse_repo_url(repo: &str) -> Result<Url> {
 }
 
 fn extract_chunks(source: &str) -> Result<Vec<Chunk>> {
+	let start = std::time::Instant::now();
+	trace!(
+		"Starting chunk extraction for {} chars of source",
+		source.len()
+	);
+
 	let mut parser = tree_sitter::Parser::new();
 	let language = tree_sitter_rust::LANGUAGE.into();
 	parser.set_language(&language)?;
@@ -120,6 +156,13 @@ fn extract_chunks(source: &str) -> Result<Vec<Chunk>> {
 			chunks.push(chunk);
 		}
 	}
+
+	let elapsed = start.elapsed();
+	trace!(
+		"Chunk extraction completed in {:?} - produced {} chunks",
+		elapsed,
+		chunks.len()
+	);
 
 	Ok(chunks)
 }
@@ -154,6 +197,7 @@ fn process_node(
 	// Mark lines as processed and extract content
 	mark_lines_processed(start_line..=end_line, processed_lines);
 	let content = extract_lines(source, start_line..=end_line);
+	let content = trim_to_token_limit(&content).unwrap_or_default();
 
 	Some(Chunk {
 		kind,
@@ -200,6 +244,7 @@ fn handle_comment(
 
 	mark_lines_processed(start_line..=end_line, processed_lines);
 	let content = extract_lines(source, start_line..=end_line);
+	let content = trim_to_token_limit(&content).unwrap_or_default();
 
 	Some(Chunk {
 		kind: ChunkKind::Comment,
@@ -266,4 +311,36 @@ fn extract_lines(source: &str, range: RangeInclusive<usize>) -> String {
 		.take(range.end() - range.start() + 1)
 		.collect::<Vec<_>>()
 		.join("\n")
+}
+
+fn trim_to_token_limit(content: &str) -> Result<String> {
+	let start = std::time::Instant::now();
+	let tokens = BPE.encode_with_special_tokens(content);
+	let encode_time = start.elapsed();
+
+	trace!(
+		"Token encoding took {:?} for {} chars -> {} tokens",
+		encode_time,
+		content.len(),
+		tokens.len()
+	);
+
+	if tokens.len() <= MAX_TOKENS {
+		return Ok(content.to_string());
+	}
+
+	// Trim to MAX_TOKENS
+	let trimmed_tokens = &tokens[..MAX_TOKENS];
+	let decode_start = std::time::Instant::now();
+	let trimmed_content = BPE.decode(trimmed_tokens.to_vec())?;
+	let decode_time = decode_start.elapsed();
+
+	trace!(
+		"Token decoding took {:?} for {} tokens -> {} chars",
+		decode_time,
+		trimmed_tokens.len(),
+		trimmed_content.len()
+	);
+
+	Ok(trimmed_content)
 }

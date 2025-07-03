@@ -92,37 +92,59 @@ impl Backend {
 		&self,
 		#[tool(aggr)] req: EmbedRequest,
 	) -> Result<CallToolResult, McpError> {
+		tracing::info!("Starting embed_crate for crate: {}", req.crate_name);
 		let operation_id = format!("embed_{}_{}", req.crate_name, Uuid::new_v4());
+		tracing::debug!("Generated operation ID: {}", operation_id);
 		let ops = self.embed_operations.clone();
 		let ct = self.cancellation_token.child_token();
 
 		// Resolve crate to GitHub repo URL
+		tracing::info!("Resolving crate {} to GitHub repository", req.crate_name);
 		let repo_url = resolve_crate_github_repo(&req.crate_name, None)
 			.await
 			.map_err(|e| {
+				tracing::error!(
+					"Failed to resolve crate {} to GitHub repo: {}",
+					req.crate_name,
+					e
+				);
 				McpError::invalid_request(
 					format!("Failed to resolve crate to GitHub repository: {}", e),
 					None,
 				)
 			})?;
+		tracing::info!("Resolved {} to repository: {}", req.crate_name, repo_url);
 
 		// Check if this repo is already embedded
 		let table_name = gen_table_name_without_version(&req.crate_name);
+		tracing::debug!("Generated table name: {}", table_name);
 
+		tracing::info!("Checking if {} is already embedded", req.crate_name);
 		if let Ok(qdrant_url) = dotenvy::var("QDRANT_URL")
 			&& let Ok(qdrant_client) = qdrant_client::Qdrant::from_url(&qdrant_url)
 				.api_key(dotenvy::var("QDRANT_API_KEY").ok())
 				.build() && let Ok(exists) = qdrant_client.collection_exists(&table_name).await
 			&& exists
 		{
+			tracing::info!("Crate {} is already embedded, skipping", req.crate_name);
 			return Ok(CallToolResult::success(vec![Content::text(format!(
 				"Documentation for {} is already embedded from repository: {}",
 				req.crate_name, repo_url
 			))]));
 		}
+		tracing::info!(
+			"Crate {} not found in embeddings, proceeding with embedding",
+			req.crate_name
+		);
 
 		{
+			tracing::debug!("Acquiring write lock for operations tracking");
 			let mut ops_lock = ops.write().await;
+			tracing::info!(
+				"Registering operation {} for crate {}",
+				operation_id,
+				req.crate_name
+			);
 			ops_lock.insert(
 				operation_id.clone(),
 				EmbedOperation {
@@ -138,16 +160,29 @@ impl Backend {
 		let crate_name = req.crate_name.clone();
 
 		tokio::spawn(async move {
+			tracing::info!(
+				"Spawning background task for embedding {} (operation: {})",
+				crate_name,
+				op_id_clone
+			);
 			let result = tokio::select! {
 				_ = ct.cancelled() => {
+					tracing::warn!("Operation {} cancelled for crate {}", op_id_clone, crate_name);
 					Err(anyhow::anyhow!("Operation cancelled"))
 				}
 				res = async {
 					// Process GitHub repository and embed it
-					process_and_embed_github_repo(&crate_name).await
+					tracing::info!("Starting GitHub repository processing for {}", crate_name);
+					let embed_result = process_and_embed_github_repo(&crate_name).await;
+					match &embed_result {
+						Ok(_) => tracing::info!("Successfully processed repository for {}", crate_name),
+						Err(e) => tracing::error!("Failed to process repository for {}: {}", crate_name, e),
+					}
+					embed_result
 				} => res
 			};
 
+			tracing::debug!("Updating operation status for {}", op_id_clone);
 			let mut ops_lock = ops.write().await;
 			if let Some(op) = ops_lock.get_mut(&op_id_clone) {
 				match result {
@@ -157,15 +192,33 @@ impl Backend {
 							"Successfully processed and embedded repository for {}",
 							op.crate_name
 						);
+						tracing::info!(
+							"Operation {} completed successfully for {}",
+							op_id_clone,
+							op.crate_name
+						);
 					}
 					Err(e) => {
 						op.status = EmbedStatus::Failed;
 						op.message = format!("Failed to embed repository: {}", e);
+						tracing::error!(
+							"Operation {} failed for {}: {}",
+							op_id_clone,
+							op.crate_name,
+							e
+						);
 					}
 				}
+			} else {
+				tracing::warn!("Operation {} not found in tracking map", op_id_clone);
 			}
 		});
 
+		tracing::info!(
+			"Embed operation {} started for crate {}",
+			operation_id,
+			req.crate_name
+		);
 		Ok(CallToolResult::success(vec![Content::text(format!(
 			"Started repository processing and embedding with ID: {}. Sleep for about 6 \
 			 seconds and then Use \"check_embed_status\" to monitor progress --- do \

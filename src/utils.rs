@@ -86,9 +86,6 @@ pub async fn resolve_crate_github_repo(
 		anyhow::anyhow!("No repository found for crate: {}", crate_name)
 	})?;
 
-	println!("repo: {repository}");
-	println!("version: {version:?}");
-
 	// todo: refactor this
 	let repo_url = if let Some(ver) = version {
 		// if version is provided, append /tree/v{version} or /tree/{version}
