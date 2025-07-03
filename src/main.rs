@@ -2,7 +2,6 @@ use crate::{backend::Backend, logging::CustomFormatter};
 use anyhow::Result;
 use rmcp::transport::sse_server::{SseServer, SseServerConfig};
 use tokio_util::sync::CancellationToken;
-use tracing::Level;
 use tracing_subscriber::{self, EnvFilter};
 
 pub mod backend;
@@ -23,7 +22,7 @@ async fn main() -> Result<()> {
 
 	tracing_subscriber::fmt()
 		.event_format(CustomFormatter)
-		.with_env_filter(EnvFilter::from_default_env().add_directive(Level::DEBUG.into()))
+		.with_env_filter(EnvFilter::from_default_env())
 		.with_writer(std::io::stdout)
 		.init();
 
