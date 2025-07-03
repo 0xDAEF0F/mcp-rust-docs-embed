@@ -22,10 +22,6 @@ where
 		let meta = event.metadata();
 		let level = meta.level();
 
-		// format timestamp
-		let timestamp = Local::now().format("%m/%d - %I:%M%p");
-		write!(writer, "[{}] ", timestamp)?;
-
 		// format level with color
 		let level_str = match *level {
 			Level::ERROR => "ERROR".red(),

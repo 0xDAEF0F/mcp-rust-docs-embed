@@ -24,7 +24,7 @@ async fn main() -> Result<()> {
 	tracing_subscriber::fmt()
 		.event_format(CustomFormatter)
 		.with_env_filter(EnvFilter::from_default_env().add_directive(Level::DEBUG.into()))
-		.with_writer(std::io::stderr)
+		.with_writer(std::io::stdout)
 		.init();
 
 	tracing::info!("Starting MCP SSE server");
