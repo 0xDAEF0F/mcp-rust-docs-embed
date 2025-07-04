@@ -109,7 +109,7 @@ impl Backend {
 					e
 				);
 				McpError::invalid_request(
-					format!("Failed to resolve crate to GitHub repository: {}", e),
+					format!("Failed to resolve crate to GitHub repository: {e}"),
 					None,
 				)
 			})?;
@@ -200,7 +200,7 @@ impl Backend {
 					}
 					Err(e) => {
 						op.status = EmbedStatus::Failed;
-						op.message = format!("Failed to embed repository: {}", e);
+						op.message = format!("Failed to embed repository: {e}");
 						tracing::error!(
 							"Operation {} failed for {}: {}",
 							op_id_clone,
@@ -220,10 +220,9 @@ impl Backend {
 			req.crate_name
 		);
 		Ok(CallToolResult::success(vec![Content::text(format!(
-			"Started repository processing and embedding with ID: {}. Sleep for about 6 \
-			 seconds and then Use \"check_embed_status\" to monitor progress --- do \
-			 this until it either succeeds or fails.",
-			operation_id
+			"Started repository processing and embedding with ID: {operation_id}. Sleep \
+			 for about 6 seconds and then Use \"check_embed_status\" to monitor \
+			 progress --- do this until it either succeeds or fails."
 		))]))
 	}
 
@@ -359,9 +358,7 @@ impl Backend {
 
 			// parse collection name to extract crate name
 			// format is: repo_{crate_name}
-			if name.starts_with("repo_") {
-				let crate_name = &name[5..];
-
+			if let Some(crate_name) = name.strip_prefix("repo_") {
 				// convert back underscores to original characters
 				let crate_name = crate_name.replace('_', "-");
 

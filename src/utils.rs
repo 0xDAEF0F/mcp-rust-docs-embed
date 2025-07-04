@@ -38,7 +38,7 @@ pub fn gen_table_name_without_version(crate_name: &str) -> String {
 
 /// Resolves the latest version of a Rust crate from crates.io
 pub async fn resolve_latest_crate_version(crate_name: &str) -> Result<String> {
-	let url = format!("https://crates.io/api/v1/crates/{}", crate_name);
+	let url = format!("https://crates.io/api/v1/crates/{crate_name}");
 	let client = reqwest::Client::new();
 
 	let response = client
@@ -67,7 +67,7 @@ pub async fn resolve_latest_crate_version(crate_name: &str) -> Result<String> {
 pub async fn resolve_crate_github_repo(crate_name: &str) -> Result<Url> {
 	let client = reqwest::Client::new();
 
-	let url = format!("https://crates.io/api/v1/crates/{}", crate_name);
+	let url = format!("https://crates.io/api/v1/crates/{crate_name}");
 	let response = client
 		.get(&url)
 		.header("User-Agent", "embed-anything-rs")

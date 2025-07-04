@@ -33,7 +33,7 @@ pub async fn get_crate_features(
 		None => crate::utils::resolve_latest_crate_version(crate_name).await?,
 	};
 
-	let url = format!("https://crates.io/api/v1/crates/{}/{}", crate_name, version);
+	let url = format!("https://crates.io/api/v1/crates/{crate_name}/{version}");
 	let client = reqwest::Client::new();
 
 	let response = client
@@ -108,7 +108,7 @@ mod tests {
 		// let features = get_crate_features("lsp-types", None).await?;
 		let features = get_crate_features("async-lsp", None).await?;
 
-		println!("features: {:?}", features);
+		println!("features: {features:?}");
 
 		Ok(())
 	}
@@ -122,11 +122,11 @@ mod tests {
 		match result {
 			Ok(features) => {
 				// it's ok if it has features or not
-				println!("once_cell 1.0.0 features: {:?}", features);
+				println!("once_cell 1.0.0 features: {features:?}");
 			}
 			Err(e) => {
 				// also ok if this specific version doesn't exist
-				println!("Error (expected for old version): {}", e);
+				println!("Error (expected for old version): {e}");
 			}
 		}
 
@@ -161,8 +161,7 @@ mod tests {
 		for feature in expected_features {
 			assert!(
 				features.contains(&feature.to_string()),
-				"tokio should have '{}' feature",
-				feature
+				"tokio should have '{feature}' feature"
 			);
 		}
 

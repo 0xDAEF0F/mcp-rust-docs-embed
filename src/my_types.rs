@@ -30,7 +30,7 @@ pub struct DocItem {
 impl fmt::Display for DocItem {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		if let Some(doc_string) = &self.doc_string {
-			writeln!(f, "{}", doc_string)?;
+			writeln!(f, "{doc_string}")?;
 			writeln!(f)?;
 		}
 		writeln!(f, "```rust")?;

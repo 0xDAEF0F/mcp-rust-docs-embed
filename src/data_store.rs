@@ -118,7 +118,7 @@ impl DataStore {
 		let collection_name = if self.is_repo_based {
 			gen_table_name_without_version(&self.crate_name)
 		} else {
-			gen_table_name(&self.crate_name, &self.version.as_ref().unwrap())
+			gen_table_name(&self.crate_name, self.version.as_ref().unwrap())
 		};
 
 		self.qdrant_client
@@ -144,7 +144,7 @@ impl DataStore {
 		let collection_name = if self.is_repo_based {
 			gen_table_name_without_version(&self.crate_name)
 		} else {
-			gen_table_name(&self.crate_name, &self.version.as_ref().unwrap())
+			gen_table_name(&self.crate_name, self.version.as_ref().unwrap())
 		};
 
 		// generate a unique id based on timestamp and random value
@@ -225,7 +225,7 @@ impl DataStore {
 		let collection_name = if self.is_repo_based {
 			gen_table_name_without_version(&self.crate_name)
 		} else {
-			gen_table_name(&self.crate_name, &self.version.as_ref().unwrap())
+			gen_table_name(&self.crate_name, self.version.as_ref().unwrap())
 		};
 
 		debug!("Storing metadata in collection: {}", collection_name);
@@ -254,12 +254,12 @@ impl DataStore {
 
 		match qdrant_client.get_points(get_points).await {
 			Ok(response) => {
-				if let Some(point) = response.result.first() {
-					if let Some(metadata_value) = point.payload.get("metadata") {
-						let metadata: EmbeddingMetadata =
-							serde_json::from_value(metadata_value.clone().into())?;
-						return Ok(Some(metadata));
-					}
+				if let Some(point) = response.result.first()
+					&& let Some(metadata_value) = point.payload.get("metadata")
+				{
+					let metadata: EmbeddingMetadata =
+						serde_json::from_value(metadata_value.clone().into())?;
+					return Ok(Some(metadata));
 				}
 				Ok(None)
 			}
@@ -283,12 +283,12 @@ impl DataStore {
 
 		match qdrant_client.get_points(get_points).await {
 			Ok(response) => {
-				if let Some(point) = response.result.first() {
-					if let Some(metadata_value) = point.payload.get("metadata") {
-						let metadata: EmbeddingMetadata =
-							serde_json::from_value(metadata_value.clone().into())?;
-						return Ok(Some(metadata));
-					}
+				if let Some(point) = response.result.first()
+					&& let Some(metadata_value) = point.payload.get("metadata")
+				{
+					let metadata: EmbeddingMetadata =
+						serde_json::from_value(metadata_value.clone().into())?;
+					return Ok(Some(metadata));
 				}
 				Ok(None)
 			}

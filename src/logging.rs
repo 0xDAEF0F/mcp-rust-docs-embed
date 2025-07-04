@@ -1,4 +1,3 @@
-use chrono::Local;
 use colored::Colorize;
 use tracing::{Event, Level, Subscriber};
 use tracing_subscriber::{
@@ -30,7 +29,7 @@ where
 			Level::DEBUG => "DEBUG".blue(),
 			Level::TRACE => "TRACE".purple(),
 		};
-		write!(writer, "[{}] ", level_str)?;
+		write!(writer, "[{level_str}] ")?;
 
 		// format target
 		write!(writer, "[{}]: ", meta.target())?;
