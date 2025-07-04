@@ -5,10 +5,10 @@ use tokio_util::sync::CancellationToken;
 use tracing_subscriber::{self, EnvFilter};
 
 pub mod backend;
+pub mod chunk_repo;
 pub mod config;
 pub mod data_store;
 pub mod error;
-pub mod features;
 pub mod github_processor;
 pub mod json_types;
 pub mod logging;

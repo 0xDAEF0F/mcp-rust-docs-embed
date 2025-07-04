@@ -1,8 +1,10 @@
-use crate::{data_store::DataStore, utils::resolve_crate_github_repo};
+use crate::{
+	chunk_repo::process_github_repo, data_store::DataStore,
+	utils::resolve_crate_github_repo,
+};
 use anyhow::{Context, Result};
 use async_openai::{Client, config::OpenAIConfig, types::CreateEmbeddingRequestArgs};
 use futures::stream::{self, StreamExt};
-use mcp_rust_docs_embed::chunk_repo::process_github_repo;
 use tracing::{info, trace};
 
 /// Processes a GitHub repository and embeds its documentation
