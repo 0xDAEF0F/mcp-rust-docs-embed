@@ -13,6 +13,7 @@ use qdrant_client::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use tracing::{debug, trace};
 
 /// Metadata stored with each embedding collection
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -187,13 +188,17 @@ impl DataStore {
 		for result in search_res.result {
 			let score = result.score;
 
-			// extract content from payload
-			let content = result
-				.payload
-				.get("content")
-				.and_then(|v| v.as_str())
-				.ok_or_else(|| anyhow::anyhow!("missing content in payload"))?
-				.to_string();
+			let Some(content) = result.payload.get("content") else {
+				trace!(
+					"skipping result that does not have a content field (probably \
+					 metadata)"
+				);
+				continue;
+			};
+			let content = content
+				.as_str()
+				.context("could not convert the content `Value` into a `String`")?
+				.to_owned();
 
 			results.push((score, content));
 		}

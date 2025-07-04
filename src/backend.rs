@@ -120,6 +120,7 @@ impl Backend {
 		tracing::debug!("Generated table name: {}", table_name);
 
 		tracing::info!("Checking if {} is already embedded", req.crate_name);
+
 		if let Ok(qdrant_url) = dotenvy::var("QDRANT_URL")
 			&& let Ok(qdrant_client) = qdrant_client::Qdrant::from_url(&qdrant_url)
 				.api_key(dotenvy::var("QDRANT_API_KEY").ok())
