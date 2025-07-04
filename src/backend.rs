@@ -100,7 +100,7 @@ impl Backend {
 
 		// Resolve crate to GitHub repo URL
 		tracing::info!("Resolving crate {} to GitHub repository", req.crate_name);
-		let repo_url = resolve_crate_github_repo(&req.crate_name, None)
+		let repo_url = resolve_crate_github_repo(&req.crate_name)
 			.await
 			.map_err(|e| {
 				tracing::error!(
@@ -150,7 +150,7 @@ impl Backend {
 				EmbedOperation {
 					status: EmbedStatus::InProgress,
 					crate_name: req.crate_name.clone(),
-					repo_url: repo_url.clone(),
+					repo_url: repo_url.to_string(),
 					message: "Starting repository processing and embedding".to_string(),
 				},
 			);

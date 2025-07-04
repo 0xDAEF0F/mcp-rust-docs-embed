@@ -10,14 +10,14 @@ pub async fn process_and_embed_github_repo(crate_name: &str) -> Result<()> {
 	info!("Processing GitHub repository for crate: {crate_name}");
 
 	// Resolve crate name to GitHub repository URL
-	let repo_url = resolve_crate_github_repo(crate_name, None)
+	let repo_url = resolve_crate_github_repo(crate_name)
 		.await
 		.context("Failed to resolve crate to GitHub repository")?;
 
 	info!("Resolved to repository: {repo_url}");
 
 	// Process the GitHub repository using chunker_rs
-	let chunks_map = process_github_repo(&repo_url)
+	let chunks_map = process_github_repo(repo_url.as_str())
 		.await
 		.context("Failed to process GitHub repository")?;
 
