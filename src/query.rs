@@ -21,35 +21,12 @@ impl QueryService {
 	pub async fn query_embeddings(
 		&self,
 		query: &str,
-		crate_name: &str,
-		version: &str,
+		repo_url: &str,
 		limit: u64,
 	) -> Result<Vec<(f32, String)>> {
-		info!("querying for: {query}");
+		info!("querying for: {query} in repository: {repo_url}");
 
-		let data_store = DataStore::try_new(crate_name, version).await?;
-		let q_vec = self.embed_query(query).await?;
-
-		let results = data_store.query_with_content(q_vec, limit).await?;
-
-		if results.is_empty() {
-			info!("no results found for query: {query}");
-			return Ok(vec![]);
-		}
-
-		info!("found {} results for query: {}", results.len(), query);
-		Ok(results)
-	}
-
-	pub async fn query_embeddings_without_version(
-		&self,
-		query: &str,
-		crate_name: &str,
-		limit: u64,
-	) -> Result<Vec<(f32, String)>> {
-		info!("querying for: {query}");
-
-		let data_store = DataStore::try_new_without_version(crate_name).await?;
+		let data_store = DataStore::new(repo_url).await?;
 		let q_vec = self.embed_query(query).await?;
 
 		let results = data_store.query_with_content(q_vec, limit).await?;

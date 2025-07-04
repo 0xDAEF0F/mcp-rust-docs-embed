@@ -1,25 +1,15 @@
-use crate::{
-	chunk_repo::process_github_repo, data_store::DataStore,
-	utils::resolve_crate_github_repo,
-};
+use crate::{chunk_repo::process_github_repo, data_store::DataStore};
 use anyhow::{Context, Result};
 use async_openai::{Client, config::OpenAIConfig, types::CreateEmbeddingRequestArgs};
 use futures::stream::{self, StreamExt};
 use tracing::{info, trace};
 
 /// Processes a GitHub repository and embeds its documentation
-pub async fn process_and_embed_github_repo(crate_name: &str) -> Result<()> {
-	info!("Processing GitHub repository for crate: {crate_name}");
-
-	// Resolve crate name to GitHub repository URL
-	let repo_url = resolve_crate_github_repo(crate_name)
-		.await
-		.context("Failed to resolve crate to GitHub repository")?;
-
-	info!("Resolved to repository: {repo_url}");
+pub async fn process_and_embed_github_repo(repo_url: &str) -> Result<()> {
+	info!("Processing GitHub repository: {repo_url}");
 
 	// Process the GitHub repository using chunker_rs
-	let chunks_map = process_github_repo(repo_url.as_str())
+	let chunks_map = process_github_repo(repo_url)
 		.await
 		.context("Failed to process GitHub repository")?;
 
@@ -31,8 +21,8 @@ pub async fn process_and_embed_github_repo(crate_name: &str) -> Result<()> {
 
 	info!("Processed repository into {} chunks", chunks.len());
 
-	// Create or reset data store (without version/features)
-	let data_store = DataStore::try_new_without_version(crate_name).await?;
+	// Create or reset data store for repository
+	let data_store = DataStore::new(repo_url).await?;
 	data_store.reset().await?;
 
 	// Convert chunks to strings

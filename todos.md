@@ -7,6 +7,7 @@
 ## chore
 
 - `embedded_crates` should just return this schema:
+- instead of embed crate lets change it to embed repo
 
 ```json
 {

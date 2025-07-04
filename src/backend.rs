@@ -2,7 +2,7 @@ use crate::{
 	error::BackendError,
 	github_processor::process_and_embed_github_repo,
 	query::QueryService,
-	utils::{gen_table_name_without_version, resolve_crate_github_repo},
+	utils::{extract_repo_name_from_url, gen_table_name_for_repo},
 };
 use anyhow::{Context, Result};
 use rmcp::{
@@ -29,16 +29,16 @@ pub struct GenDocsRequest {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct EmbedRequest {
-	#[schemars(description = "Crate name to embed docs for")]
-	pub crate_name: String,
+	#[schemars(description = "Git repository URL to embed")]
+	pub repo_url: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct QueryRequest {
 	#[schemars(description = "Query to search for in the embedded docs")]
 	pub query: String,
-	#[schemars(description = "Crate name to search in")]
-	pub crate_name: String,
+	#[schemars(description = "Repository URL to search in")]
+	pub repo_url: String,
 	#[serde(default = "default_limit")]
 	#[schemars(description = "Number of results to return (defaults to 10)")]
 	pub limit: u64,
@@ -57,7 +57,6 @@ fn default_limit() -> u64 {
 #[derive(Debug, Clone)]
 pub struct EmbedOperation {
 	pub status: EmbedStatus,
-	pub crate_name: String,
 	pub repo_url: String,
 	pub message: String,
 }
@@ -84,42 +83,27 @@ impl Backend {
 		}
 	}
 
-	#[tool(
-		description = "Generate and embed documentation for a given crate from its \
-		               GitHub repository"
-	)]
-	async fn embed_crate(
+	#[tool(description = "Generate and embed documentation from a Git repository")]
+	async fn embed_repo(
 		&self,
 		#[tool(aggr)] req: EmbedRequest,
 	) -> Result<CallToolResult, McpError> {
-		tracing::info!("Starting embed_crate for crate: {}", req.crate_name);
-		let operation_id = format!("embed_{}_{}", req.crate_name, Uuid::new_v4());
+		tracing::info!("Starting embed_repo for repository: {}", req.repo_url);
+		// Extract a safe name from the URL for the operation ID
+		let repo_name = extract_repo_name_from_url(&req.repo_url)
+			.unwrap_or_else(|_| "unknown".to_string());
+		let operation_id = format!("embed_{}_{}", repo_name, Uuid::new_v4());
 		tracing::debug!("Generated operation ID: {}", operation_id);
 		let ops = self.embed_operations.clone();
 		let ct = self.cancellation_token.child_token();
 
-		// Resolve crate to GitHub repo URL
-		tracing::info!("Resolving crate {} to GitHub repository", req.crate_name);
-		let repo_url = resolve_crate_github_repo(&req.crate_name)
-			.await
-			.map_err(|e| {
-				tracing::error!(
-					"Failed to resolve crate {} to GitHub repo: {}",
-					req.crate_name,
-					e
-				);
-				McpError::invalid_request(
-					format!("Failed to resolve crate to GitHub repository: {e}"),
-					None,
-				)
-			})?;
-		tracing::info!("Resolved {} to repository: {}", req.crate_name, repo_url);
-
 		// Check if this repo is already embedded
-		let table_name = gen_table_name_without_version(&req.crate_name);
+		let table_name = gen_table_name_for_repo(&req.repo_url).map_err(|e| {
+			McpError::invalid_request(format!("Failed to generate table name: {e}"), None)
+		})?;
 		tracing::debug!("Generated table name: {}", table_name);
 
-		tracing::info!("Checking if {} is already embedded", req.crate_name);
+		tracing::info!("Checking if {} is already embedded", req.repo_url);
 
 		if let Ok(qdrant_url) = dotenvy::var("QDRANT_URL")
 			&& let Ok(qdrant_client) = qdrant_client::Qdrant::from_url(&qdrant_url)
@@ -127,57 +111,56 @@ impl Backend {
 				.build() && let Ok(exists) = qdrant_client.collection_exists(&table_name).await
 			&& exists
 		{
-			tracing::info!("Crate {} is already embedded, skipping", req.crate_name);
+			tracing::info!("Repository {} is already embedded, skipping", req.repo_url);
 			return Ok(CallToolResult::success(vec![Content::text(format!(
-				"Documentation for {} is already embedded from repository: {}",
-				req.crate_name, repo_url
+				"Repository {} is already embedded",
+				req.repo_url
 			))]));
 		}
 		tracing::info!(
-			"Crate {} not found in embeddings, proceeding with embedding",
-			req.crate_name
+			"Repository {} not found in embeddings, proceeding with embedding",
+			req.repo_url
 		);
 
 		{
 			tracing::debug!("Acquiring write lock for operations tracking");
 			let mut ops_lock = ops.write().await;
 			tracing::info!(
-				"Registering operation {} for crate {}",
+				"Registering operation {} for repository {}",
 				operation_id,
-				req.crate_name
+				req.repo_url
 			);
 			ops_lock.insert(
 				operation_id.clone(),
 				EmbedOperation {
 					status: EmbedStatus::InProgress,
-					crate_name: req.crate_name.clone(),
-					repo_url: repo_url.to_string(),
+					repo_url: req.repo_url.clone(),
 					message: "Starting repository processing and embedding".to_string(),
 				},
 			);
 		}
 
 		let op_id_clone = operation_id.clone();
-		let crate_name = req.crate_name.clone();
+		let repo_url = req.repo_url.clone();
 
 		tokio::spawn(async move {
 			tracing::info!(
 				"Spawning background task for embedding {} (operation: {})",
-				crate_name,
+				repo_url,
 				op_id_clone
 			);
 			let result = tokio::select! {
 				_ = ct.cancelled() => {
-					tracing::warn!("Operation {} cancelled for crate {}", op_id_clone, crate_name);
+					tracing::warn!("Operation {} cancelled for repository {}", op_id_clone, repo_url);
 					Err(anyhow::anyhow!("Operation cancelled"))
 				}
 				res = async {
 					// Process GitHub repository and embed it
-					tracing::info!("Starting GitHub repository processing for {}", crate_name);
-					let embed_result = process_and_embed_github_repo(&crate_name).await;
+					tracing::info!("Starting GitHub repository processing for {}", repo_url);
+					let embed_result = process_and_embed_github_repo(&repo_url).await;
 					match &embed_result {
-						Ok(_) => tracing::info!("Successfully processed repository for {}", crate_name),
-						Err(e) => tracing::error!("Failed to process repository for {}: {}", crate_name, e),
+						Ok(_) => tracing::info!("Successfully processed repository for {}", repo_url),
+						Err(e) => tracing::error!("Failed to process repository for {}: {}", repo_url, e),
 					}
 					embed_result
 				} => res
@@ -190,13 +173,13 @@ impl Backend {
 					Ok(_) => {
 						op.status = EmbedStatus::Completed;
 						op.message = format!(
-							"Successfully processed and embedded repository for {}",
-							op.crate_name
+							"Successfully processed and embedded repository {}",
+							op.repo_url
 						);
 						tracing::info!(
 							"Operation {} completed successfully for {}",
 							op_id_clone,
-							op.crate_name
+							op.repo_url
 						);
 					}
 					Err(e) => {
@@ -205,7 +188,7 @@ impl Backend {
 						tracing::error!(
 							"Operation {} failed for {}: {}",
 							op_id_clone,
-							op.crate_name,
+							op.repo_url,
 							e
 						);
 					}
@@ -216,9 +199,9 @@ impl Backend {
 		});
 
 		tracing::info!(
-			"Embed operation {} started for crate {}",
+			"Embed operation {} started for repository {}",
 			operation_id,
-			req.crate_name
+			req.repo_url
 		);
 		Ok(CallToolResult::success(vec![Content::text(format!(
 			"Started repository processing and embedding with ID: {operation_id}. Sleep \
@@ -227,16 +210,15 @@ impl Backend {
 		))]))
 	}
 
-	#[tool(
-		description = "Perform semantic search on a crates' documentation vector \
-		               embeddings"
-	)]
+	#[tool(description = "Perform semantic search on repository documentation embeddings")]
 	async fn query_embeddings(
 		&self,
 		#[tool(aggr)] req: QueryRequest,
 	) -> Result<CallToolResult, McpError> {
-		// Check if embeddings exist for this crate
-		let table_name = gen_table_name_without_version(&req.crate_name);
+		// Check if embeddings exist for this repository
+		let table_name = gen_table_name_for_repo(&req.repo_url).map_err(|e| {
+			McpError::invalid_request(format!("Failed to generate table name: {e}"), None)
+		})?;
 		if let Ok(qdrant_url) = dotenvy::var("QDRANT_URL")
 			&& let Ok(qdrant_client) = qdrant_client::Qdrant::from_url(&qdrant_url)
 				.api_key(dotenvy::var("QDRANT_API_KEY").ok())
@@ -245,11 +227,13 @@ impl Backend {
 			match qdrant_client.collection_exists(&table_name).await {
 				Ok(exists) => {
 					if !exists {
-						return Err(BackendError::NoEmbeddedDocs {
-							crate_name: req.crate_name.clone(),
-							version: "repo".to_string(),
-						}
-						.into());
+						return Err(McpError::invalid_request(
+							format!(
+								"No embeddings found for repository: {}",
+								req.repo_url
+							),
+							None,
+						));
 					}
 				}
 				Err(_) => {
@@ -263,7 +247,7 @@ impl Backend {
 			.map_err(BackendError::Internal)?;
 
 		let results = query_service
-			.query_embeddings_without_version(&req.query, &req.crate_name, req.limit)
+			.query_embeddings(&req.query, &req.repo_url, req.limit)
 			.await
 			.context("failed to query embeddings")
 			.map_err(BackendError::Internal)?;
@@ -273,10 +257,10 @@ impl Backend {
 		}
 
 		let header = format!(
-			"Found {} results for query: {} (from {} repository)",
+			"Found {} results for query: {} (from repository: {})",
 			results.len(),
 			req.query,
-			req.crate_name
+			req.repo_url
 		);
 
 		let mut contents = vec![Content::text(header)];
@@ -314,7 +298,7 @@ impl Backend {
 
 				Ok(CallToolResult::success(vec![Content::text(format!(
 					"Embed operation {} for {}: {} - {}",
-					req.operation_id, op.crate_name, status_text, op.message
+					req.operation_id, op.repo_url, status_text, op.message
 				))]))
 			}
 			None => Err(BackendError::OperationNotFound(req.operation_id.clone()).into()),
@@ -322,19 +306,17 @@ impl Backend {
 	}
 
 	#[tool(
-		description = "List the crates and its versions/features that are already \
-		               embedded in the mcp server"
+		description = "List the repositories that are already embedded in the mcp server"
 	)]
-	async fn list_embedded_crates(&self) -> Result<CallToolResult, McpError> {
+	async fn list_embedded_repos(&self) -> Result<CallToolResult, McpError> {
 		#[derive(Serialize)]
-		struct CrateVersionInfo {
-			version: String,
-			features: Option<Vec<String>>,
+		struct RepoInfo {
+			repo_name: String,
 			embedded_at: Option<String>,
 			doc_count: Option<usize>,
 		}
 
-		let mut crate_info: HashMap<String, Vec<CrateVersionInfo>> = HashMap::new();
+		let mut repo_info: Vec<RepoInfo> = Vec::new();
 
 		let qdrant_url = dotenvy::var("QDRANT_URL")
 			.context("QDRANT_URL environment variable not set")
@@ -357,49 +339,44 @@ impl Backend {
 		for collection in collections.collections {
 			let name = collection.name;
 
-			// parse collection name to extract crate name
-			// format is: repo_{crate_name}
-			if let Some(crate_name) = name.strip_prefix("repo_") {
+			// parse collection name to extract repo name
+			// format is: repo_{owner}_{repo}
+			if let Some(repo_name) = name.strip_prefix("repo_") {
 				// convert back underscores to original characters
-				let crate_name = crate_name.replace('_', "-");
+				let repo_name = repo_name.replace('_', "/").replacen("/", "_", 1);
 
 				// Try to get metadata for this collection
-				let metadata =
-					crate::data_store::DataStore::get_metadata_without_version(
-						&qdrant_client,
-						&crate_name,
-					)
-					.await
-					.ok()
-					.flatten();
+				let metadata = crate::data_store::DataStore::get_metadata(
+					&qdrant_client,
+					&format!("https://github.com/{repo_name}"),
+				)
+				.await
+				.ok()
+				.flatten();
 
 				let info = if let Some(meta) = metadata {
-					CrateVersionInfo {
-						version: "repo".to_string(),
-						features: None,
+					RepoInfo {
+						repo_name,
 						embedded_at: Some(meta.embedded_at.to_rfc3339()),
 						doc_count: Some(meta.doc_count),
 					}
 				} else {
-					CrateVersionInfo {
-						version: "repo".to_string(),
-						features: None,
+					RepoInfo {
+						repo_name,
 						embedded_at: None,
 						doc_count: None,
 					}
 				};
 
-				crate_info.entry(crate_name).or_default().push(info);
+				repo_info.push(info);
 			}
 		}
 
-		// sort versions for each crate
-		for versions in crate_info.values_mut() {
-			versions.sort_by(|a, b| a.version.cmp(&b.version));
-		}
+		// sort repositories by name
+		repo_info.sort_by(|a, b| a.repo_name.cmp(&b.repo_name));
 
-		let json_output = serde_json::to_string_pretty(&crate_info)
-			.context("failed to serialize crate info")
+		let json_output = serde_json::to_string_pretty(&repo_info)
+			.context("failed to serialize repo info")
 			.map_err(BackendError::Internal)?;
 
 		Ok(CallToolResult::success(vec![Content::text(json_output)]))
@@ -417,7 +394,8 @@ impl ServerHandler for Backend {
 				version: "0.1.0".to_string(),
 			},
 			instructions: Some(
-				"MCP server for Rust documentation embedding and search".to_string(),
+				"MCP server for Git repository documentation embedding and search"
+					.to_string(),
 			),
 		}
 	}
