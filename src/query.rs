@@ -83,31 +83,4 @@ impl QueryService {
 
 		Ok(response.data[0].embedding.clone())
 	}
-
-	pub fn print_results(results: &[(f32, String)]) {
-		for (i, (score, content)) in results.iter().enumerate() {
-			println!("\n--- Result {} (score: {:.4}) ---", i + 1, score);
-			println!("{content}");
-		}
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-
-	#[test]
-	fn test_print_results_empty() {
-		let results = vec![];
-		QueryService::print_results(&results);
-	}
-
-	#[test]
-	fn test_print_results_with_data() {
-		let results = vec![
-			(0.95, "Test content 1".to_string()),
-			(0.85, "Test content 2".to_string()),
-		];
-		QueryService::print_results(&results);
-	}
 }
