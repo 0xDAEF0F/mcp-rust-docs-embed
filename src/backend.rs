@@ -113,7 +113,7 @@ impl Backend {
 		let operation_id = format!("embed_{}_{}", repo_name, Uuid::new_v4());
 		tracing::debug!("Generated operation ID: {}", operation_id);
 		let ops = self.embed_operations.clone();
-		let ct = self.cancellation_token.child_token();
+		let cancellation_token = self.cancellation_token.child_token();
 
 		// Check if this repo is already embedded
 		let table_name = gen_table_name_for_repo(&req.repo_url).map_err(|e| {
@@ -158,18 +158,18 @@ impl Backend {
 			);
 		}
 
-		let op_id_clone = operation_id.clone();
+		let background_operation_id = operation_id.clone();
 		let repo_url = req.repo_url.clone();
 
 		tokio::spawn(async move {
 			tracing::info!(
 				"Spawning background task for embedding {} (operation: {})",
 				repo_url,
-				op_id_clone
+				background_operation_id
 			);
 			let result = tokio::select! {
-				_ = ct.cancelled() => {
-					tracing::warn!("Operation {} cancelled for repository {}", op_id_clone, repo_url);
+				_ = cancellation_token.cancelled() => {
+					tracing::warn!("Operation {} cancelled for repository {}", background_operation_id, repo_url);
 					Err(anyhow::anyhow!("Operation cancelled"))
 				}
 				res = async {
@@ -184,9 +184,9 @@ impl Backend {
 				} => res
 			};
 
-			tracing::debug!("Updating operation status for {}", op_id_clone);
+			tracing::debug!("Updating operation status for {}", background_operation_id);
 			let mut ops_lock = ops.write().await;
-			if let Some(op) = ops_lock.get_mut(&op_id_clone) {
+			if let Some(op) = ops_lock.get_mut(&background_operation_id) {
 				match result {
 					Ok(_) => {
 						op.status = EmbedStatus::Completed;
@@ -196,7 +196,7 @@ impl Backend {
 						);
 						tracing::info!(
 							"Operation {} completed successfully for {}",
-							op_id_clone,
+							background_operation_id,
 							op.repo_url
 						);
 					}
@@ -205,14 +205,17 @@ impl Backend {
 						op.message = format!("Failed to embed repository: {e}");
 						tracing::error!(
 							"Operation {} failed for {}: {}",
-							op_id_clone,
+							background_operation_id,
 							op.repo_url,
 							e
 						);
 					}
 				}
 			} else {
-				tracing::warn!("Operation {} not found in tracking map", op_id_clone);
+				tracing::warn!(
+					"Operation {} not found in tracking map",
+					background_operation_id
+				);
 			}
 		});
 

@@ -101,9 +101,9 @@ fn process_node(
 	})
 }
 
-fn is_adjacent_decoration(prev: &Node, next: &Node) -> bool {
-	matches!(prev.kind(), "line_comment" | "attribute_item")
-		&& prev.end_position().row + 1 >= next.start_position().row
+fn is_adjacent_decoration(previous_sibling: &Node, next_sibling: &Node) -> bool {
+	matches!(previous_sibling.kind(), "line_comment" | "attribute_item")
+		&& previous_sibling.end_position().row + 1 >= next_sibling.start_position().row
 }
 
 fn find_first_decoration(node: &Node) -> usize {

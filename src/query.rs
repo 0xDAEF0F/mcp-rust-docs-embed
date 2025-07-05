@@ -27,9 +27,11 @@ impl QueryService {
 		info!("querying for: {query} in repository: {repo_url}");
 
 		let data_store = DataStore::new(repo_url).await?;
-		let q_vec = self.embed_query(query).await?;
+		let query_embedding = self.embed_query(query).await?;
 
-		let results = data_store.query_with_content(q_vec, limit).await?;
+		let results = data_store
+			.query_with_content(query_embedding, limit)
+			.await?;
 
 		if results.is_empty() {
 			info!("no results found for query: {query}");

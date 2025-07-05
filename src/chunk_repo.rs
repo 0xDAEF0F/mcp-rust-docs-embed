@@ -22,7 +22,7 @@ pub async fn process_github_repo(repo_url: &str) -> Result<HashMap<String, Vec<C
 		.await
 		.map_err(|e| anyhow::anyhow!("Failed to spawn blocking task: {}", e))??;
 
-	let mut result = HashMap::new();
+	let mut file_chunks_map = HashMap::new();
 
 	// Walk through all Rust and Markdown files in the repository
 	for entry in WalkDir::new(temp_dir.path())
@@ -30,8 +30,8 @@ pub async fn process_github_repo(repo_url: &str) -> Result<HashMap<String, Vec<C
 		.filter_map(Result::ok)
 		.filter(|e| e.file_type().is_file())
 		.filter(|e| {
-			let ext = e.path().extension().and_then(|s| s.to_str());
-			ext == Some("rs") || ext == Some("md")
+			let file_extension = e.path().extension().and_then(|s| s.to_str());
+			file_extension == Some("rs") || file_extension == Some("md")
 		}) {
 		let file_path = entry.path();
 		let relative_path = file_path
@@ -61,12 +61,12 @@ pub async fn process_github_repo(repo_url: &str) -> Result<HashMap<String, Vec<C
 			if let Ok(chunks) = chunks_result
 				&& !chunks.is_empty()
 			{
-				result.insert(relative_path, chunks);
+				file_chunks_map.insert(relative_path, chunks);
 			}
 		}
 	}
 
-	Ok(result)
+	Ok(file_chunks_map)
 }
 
 fn clone_repo(repo: &str) -> Result<TempDir> {
