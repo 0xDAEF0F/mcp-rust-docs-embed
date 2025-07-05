@@ -5,6 +5,7 @@ use std::{
 	ops::RangeInclusive,
 };
 use tempfile::TempDir;
+use text_splitter::{ChunkConfig, MarkdownSplitter};
 use tiktoken_rs::{CoreBPE, cl100k_base};
 use tracing::{info, trace};
 use tree_sitter::Node;
@@ -36,6 +37,7 @@ pub enum ChunkKind {
 	Function,
 	Impl,
 	Comment,
+	MarkdownSection,
 }
 
 /// Process a GitHub repository URL and extract chunks from all Rust files
@@ -56,13 +58,15 @@ pub async fn process_github_repo(repo_url: &str) -> Result<HashMap<String, Vec<C
 
 	let mut result = HashMap::new();
 
-	// Walk through all Rust files in the repository
+	// Walk through all Rust and Markdown files in the repository
 	for entry in WalkDir::new(temp_dir.path())
 		.into_iter()
 		.filter_map(Result::ok)
 		.filter(|e| e.file_type().is_file())
-		.filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("rs"))
-	{
+		.filter(|e| {
+			let ext = e.path().extension().and_then(|s| s.to_str());
+			ext == Some("rs") || ext == Some("md")
+		}) {
 		let file_path = entry.path();
 		let relative_path = file_path
 			.strip_prefix(temp_dir.path())
@@ -71,13 +75,24 @@ pub async fn process_github_repo(repo_url: &str) -> Result<HashMap<String, Vec<C
 			.to_string();
 
 		if let Ok(source) = std::fs::read_to_string(file_path) {
+			let extension = file_path.extension().and_then(|s| s.to_str()).unwrap_or("");
+
 			// Process chunks in a blocking context to handle sync operations
-			let chunks_result =
-				tokio::task::spawn_blocking(move || extract_chunks(&source))
+			let chunks_result = match extension {
+				"rs" => tokio::task::spawn_blocking(move || extract_rust_chunks(&source))
 					.await
 					.map_err(|e| {
 						anyhow::anyhow!("Failed to spawn blocking task: {}", e)
-					})?;
+					})?,
+				"md" => {
+					tokio::task::spawn_blocking(move || extract_markdown_chunks(&source))
+						.await
+						.map_err(|e| {
+							anyhow::anyhow!("Failed to spawn blocking task: {}", e)
+						})?
+				}
+				_ => continue,
+			};
 
 			if let Ok(chunks) = chunks_result
 				&& !chunks.is_empty()
@@ -122,7 +137,7 @@ fn parse_repo_url(repo: &str) -> Result<Url> {
 	}
 }
 
-fn extract_chunks(source: &str) -> Result<Vec<Chunk>> {
+fn extract_rust_chunks(source: &str) -> Result<Vec<Chunk>> {
 	let start = std::time::Instant::now();
 	trace!(
 		"Starting chunk extraction for {} chars of source",
@@ -343,4 +358,45 @@ fn trim_to_token_limit(content: &str) -> Result<String> {
 	);
 
 	Ok(trimmed_content)
+}
+
+fn extract_markdown_chunks(source: &str) -> Result<Vec<Chunk>> {
+	let start = std::time::Instant::now();
+	trace!(
+		"Starting markdown chunk extraction for {} chars of source",
+		source.len()
+	);
+
+	let splitter = MarkdownSplitter::new(ChunkConfig::new(MAX_TOKENS));
+	let mut chunks = Vec::new();
+
+	for (i, (byte_offset, chunk_text)) in splitter.chunk_indices(source).enumerate() {
+		// Calculate line numbers
+		let start_line = source[..byte_offset].matches('\n').count() + 1;
+		let end_line = start_line + chunk_text.matches('\n').count();
+
+		chunks.push(Chunk {
+			kind: ChunkKind::MarkdownSection,
+			start_line,
+			end_line,
+			content: chunk_text.to_string(),
+		});
+
+		trace!(
+			"Created markdown chunk {} with {} tokens at lines {}-{}",
+			i,
+			BPE.encode_with_special_tokens(chunk_text).len(),
+			start_line,
+			end_line
+		);
+	}
+
+	let elapsed = start.elapsed();
+	trace!(
+		"Markdown chunk extraction completed in {:?} - produced {} chunks",
+		elapsed,
+		chunks.len()
+	);
+
+	Ok(chunks)
 }
