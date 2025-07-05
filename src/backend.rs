@@ -110,8 +110,8 @@ impl Backend {
 	) -> Result<CallToolResult, McpError> {
 		tracing::info!("Starting embed_repo for repository: {}", req.repo_url);
 		// Extract a safe name from the URL for the operation ID
-		let repo_name = extract_repo_name_from_url(&req.repo_url)
-			.unwrap_or_else(|_| "unknown".to_string());
+		let repo_name =
+			extract_repo_name_from_url(&req.repo_url).unwrap_or("unknown".to_string());
 		let operation_id = format!("embed_{}_{}", repo_name, Uuid::new_v4());
 		tracing::debug!("Generated operation ID: {}", operation_id);
 		let ops = self.embed_operations.clone();

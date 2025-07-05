@@ -1,5 +1,5 @@
 use super::types::{Chunk, ChunkKind};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use once_cell::sync::Lazy;
 use std::{collections::HashSet, ops::RangeInclusive};
 use tiktoken_rs::{CoreBPE, cl100k_base};
@@ -31,7 +31,7 @@ pub fn extract_rust_chunks(source: &str) -> Result<Vec<Chunk>> {
 
 	let tree = parser
 		.parse(source, None)
-		.ok_or_else(|| anyhow::anyhow!("Failed to parse Rust source"))?;
+		.context("Failed to parse Rust source")?;
 	let root_node = tree.root_node();
 
 	let mut chunks = Vec::new();

@@ -1,5 +1,5 @@
 use crate::chunks::{self, Chunk};
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use std::collections::HashMap;
 use tempfile::TempDir;
 use tracing::info;
@@ -14,7 +14,7 @@ pub async fn process_github_repo(repo_url: &str) -> Result<HashMap<String, Vec<C
 	// Run the blocking git clone operation in a separate thread
 	let temp_dir = tokio::task::spawn_blocking(move || clone_repo(&repo_url))
 		.await
-		.map_err(|e| anyhow::anyhow!("Failed to spawn blocking task: {}", e))??;
+		.context("Failed to spawn blocking task")??;
 
 	let mut file_chunks_map = HashMap::new();
 
@@ -43,12 +43,12 @@ pub async fn process_github_repo(repo_url: &str) -> Result<HashMap<String, Vec<C
 					chunks::rust::extract_rust_chunks(&source)
 				})
 				.await
-				.map_err(|e| anyhow::anyhow!("Failed to spawn blocking task: {}", e))?,
+				.context("Failed to spawn blocking task")?,
 				"md" => tokio::task::spawn_blocking(move || {
 					chunks::markdown::extract_markdown_chunks(&source)
 				})
 				.await
-				.map_err(|e| anyhow::anyhow!("Failed to spawn blocking task: {}", e))?,
+				.context("Failed to spawn blocking task")?,
 				_ => continue,
 			};
 
