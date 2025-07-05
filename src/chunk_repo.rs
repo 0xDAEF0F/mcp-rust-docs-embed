@@ -6,14 +6,8 @@ use tracing::info;
 use url::Url;
 use walkdir::WalkDir;
 
-/// Process a GitHub repository URL and extract chunks from all Rust files
-///
-/// # Arguments
-/// * `repo_url` - A GitHub URL (e.g., "https://github.com/owner/repo") or "owner/repo"
-///   format
-///
-/// # Returns
-/// A HashMap where keys are file paths and values are vectors of chunks
+/// Extracts semantic chunks from both Rust and Markdown files in a repository
+/// to enable intelligent code search and documentation retrieval
 pub async fn process_github_repo(repo_url: &str) -> Result<HashMap<String, Vec<Chunk>>> {
 	let repo_url = repo_url.to_string();
 

@@ -8,6 +8,8 @@ pub struct QueryService {
 }
 
 impl QueryService {
+	/// Initializes OpenAI client for query embedding generation, validating API
+	/// credentials
 	pub fn new() -> Result<Self> {
 		// Check for OpenAI API key
 		dotenvy::var("OPENAI_API_KEY").context("OPENAI_API_KEY not set")?;
@@ -18,6 +20,8 @@ impl QueryService {
 		Ok(Self { client })
 	}
 
+	/// Converts natural language queries into embeddings and retrieves semantically
+	/// similar code/documentation from the indexed repository
 	pub async fn query_embeddings(
 		&self,
 		query: &str,
@@ -42,6 +46,8 @@ impl QueryService {
 		Ok(results)
 	}
 
+	/// Transforms user queries into high-dimensional vectors for similarity comparison
+	/// with stored documentation embeddings
 	pub async fn embed_query(&self, query: &str) -> Result<Vec<f32>> {
 		let request = CreateEmbeddingRequestArgs::default()
 			.model("text-embedding-3-small")

@@ -1,15 +1,15 @@
 use anyhow::{Result, bail};
 use url::Url;
 
-/// Generate deterministically the collection name in Qdrant for a
-/// given repository URL
+/// Creates consistent collection names across server restarts to ensure
+/// embeddings can be reliably retrieved for any repository
 pub fn gen_table_name_for_repo(repo_url: &str) -> Result<String> {
 	let repo_name = extract_repo_name_from_url(repo_url)?;
 	Ok(format!("repo_{}", repo_name.replace(['-', '/'], "_")))
 }
 
-/// Extract a safe repository name from a URL
-/// e.g., "https://github.com/owner/repo" -> "owner_repo"
+/// Converts repository URLs into filesystem-safe identifiers for storage
+/// and display purposes
 pub fn extract_repo_name_from_url(repo_url: &str) -> Result<String> {
 	let url = Url::parse(repo_url)?;
 
@@ -26,11 +26,8 @@ pub fn extract_repo_name_from_url(repo_url: &str) -> Result<String> {
 	}
 }
 
-/// Parse repository input which can be either a full URL or owner/repo format
-/// Examples:
-/// - "https://github.com/owner/repo" -> "https://github.com/owner/repo"
-/// - "https://github.com/owner/repo/blob/master/file.ts" -> "https://github.com/owner/repo"
-/// - "owner/repo" -> "https://github.com/owner/repo"
+/// Normalizes various repository input formats into canonical GitHub URLs,
+/// supporting both shorthand and full URL inputs for user convenience
 pub fn parse_repository_input(input: &str) -> Result<String> {
 	// Check if it's already a valid URL
 	if let Ok(url) = Url::parse(input) {

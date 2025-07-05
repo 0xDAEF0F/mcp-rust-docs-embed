@@ -16,6 +16,8 @@ const MAX_TOKENS: usize = 8192;
 static BPE: Lazy<CoreBPE> =
 	Lazy::new(|| cl100k_base().expect("Failed to initialize tiktoken BPE"));
 
+/// Parses Rust source code into semantic chunks preserving documentation context
+/// and respecting token limits for effective embedding generation
 pub fn extract_rust_chunks(source: &str) -> Result<Vec<Chunk>> {
 	let start = std::time::Instant::now();
 	trace!(

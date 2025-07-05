@@ -25,6 +25,8 @@ pub struct Item {
 }
 
 impl Item {
+	/// Extracts the Rust item type (e.g., "struct", "function") from the inner field
+	/// to categorize documentation entries for better search relevance
 	pub fn item_type(&self) -> Option<&str> {
 		self.inner.keys().next().map(|s| s.as_str())
 	}

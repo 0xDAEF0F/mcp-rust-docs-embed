@@ -39,7 +39,8 @@ impl fmt::Display for DocItem {
 	}
 }
 
-/// Creates DocItems from JsonDocs, reading the source code from the temp directory
+/// Transforms rustdoc JSON output into structured items with source code,
+/// filtering out internal items and preserving only public API elements
 pub fn create_doc_items_with_source(
 	docs: &JsonDocs,
 	temp_dir: &Path,

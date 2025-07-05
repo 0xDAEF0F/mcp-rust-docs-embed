@@ -4,7 +4,8 @@ use async_openai::{Client, config::OpenAIConfig, types::CreateEmbeddingRequestAr
 use futures::stream::{self, StreamExt};
 use tracing::{info, trace};
 
-/// Processes a GitHub repository and embeds its documentation
+/// Orchestrates the complete pipeline from cloning a repository to storing its
+/// embeddings, enabling semantic search across all code and documentation
 pub async fn process_and_embed_github_repo(repo_url: &str) -> Result<()> {
 	info!("Processing GitHub repository: {repo_url}");
 

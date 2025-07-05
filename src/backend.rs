@@ -94,6 +94,8 @@ pub struct Backend {
 
 #[tool(tool_box)]
 impl Backend {
+	/// Provides graceful shutdown capability by allowing background operations
+	/// to be cancelled when the server needs to terminate
 	pub fn new(cancellation_token: CancellationToken) -> Self {
 		Self {
 			cancellation_token,

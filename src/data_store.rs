@@ -28,7 +28,8 @@ pub struct DataStore {
 }
 
 impl DataStore {
-	/// Initialize a new data store for repository-based embedding
+	/// Creates a Qdrant collection for storing repository embeddings with deterministic
+	/// naming to enable consistent retrieval across sessions
 	pub async fn new(repo_url: &str) -> Result<Self> {
 		let qdrant_url = dotenvy::var("QDRANT_URL").context("QDRANT_URL not set")?;
 		let qdrant_api_key = dotenvy::var("QDRANT_API_KEY").ok();
@@ -61,7 +62,8 @@ impl DataStore {
 		})
 	}
 
-	/// Reset the Qdrant collection
+	/// Clears existing embeddings to allow fresh re-indexing when repository content
+	/// changes
 	pub async fn reset(&self) -> Result<()> {
 		self.qdrant_client
 			.delete_collection(&self.collection_name)
@@ -78,7 +80,7 @@ impl DataStore {
 		Ok(())
 	}
 
-	/// Add embedding data with content to Qdrant
+	/// Stores vector embeddings with their source content for semantic search retrieval
 	pub async fn add_embedding_with_content(
 		&self,
 		content: &str,
@@ -102,7 +104,8 @@ impl DataStore {
 		Ok(id)
 	}
 
-	/// Query embeddings and return the corresponding text content
+	/// Performs cosine similarity search to find most relevant code/docs for a given
+	/// query
 	pub async fn query_with_content(
 		&self,
 		query_vector: Vec<f32>,
@@ -136,7 +139,7 @@ impl DataStore {
 		Ok(results)
 	}
 
-	/// Store metadata for the collection
+	/// Persists collection metadata to track when and how the repository was indexed
 	pub async fn store_metadata(&self, doc_count: usize) -> Result<()> {
 		let metadata = EmbeddingMetadata {
 			repo_url: self.repo_url.clone(),
@@ -162,7 +165,8 @@ impl DataStore {
 		Ok(())
 	}
 
-	/// Retrieve metadata for a repository
+	/// Checks if a repository has been previously indexed and retrieves its indexing
+	/// details
 	pub async fn get_metadata(
 		qdrant_client: &Qdrant,
 		repo_url: &str,
