@@ -6,6 +6,7 @@ use tracing_subscriber::{self, EnvFilter};
 
 pub mod backend;
 pub mod chunk_repo;
+pub mod chunks;
 pub mod config;
 pub mod data_store;
 pub mod error;
