@@ -2,7 +2,9 @@ use crate::{
 	error::BackendError,
 	github_processor::process_and_embed_github_repo,
 	query::QueryService,
-	utils::{extract_repo_name_from_url, gen_table_name_for_repo},
+	utils::{
+		extract_repo_name_from_url, gen_table_name_for_repo, parse_repository_input,
+	},
 };
 use anyhow::{Context, Result};
 use rmcp::{
@@ -12,11 +14,21 @@ use rmcp::{
 	service::RequestContext,
 	tool,
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
+
+/// Custom deserializer for repository input that accepts either full URLs or owner/repo
+/// format
+fn deserialize_repository<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+	D: Deserializer<'de>,
+{
+	let input = String::deserialize(deserializer)?;
+	parse_repository_input(&input).map_err(serde::de::Error::custom)
+}
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct GenDocsRequest {
@@ -29,7 +41,10 @@ pub struct GenDocsRequest {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct EmbedRequest {
-	#[schemars(description = "Git repository URL to embed")]
+	#[serde(deserialize_with = "deserialize_repository")]
+	#[schemars(
+		description = "Repository to embed. Can be either a full GitHub URL (e.g., 'https://github.com/owner/repo') or shorthand format (e.g., 'owner/repo')"
+	)]
 	pub repo_url: String,
 }
 
@@ -37,7 +52,10 @@ pub struct EmbedRequest {
 pub struct QueryRequest {
 	#[schemars(description = "Query to search for in the embedded docs")]
 	pub query: String,
-	#[schemars(description = "Repository URL to search in")]
+	#[serde(deserialize_with = "deserialize_repository")]
+	#[schemars(
+		description = "Repository to search in. Can be either a full GitHub URL (e.g., 'https://github.com/owner/repo') or shorthand format (e.g., 'owner/repo')"
+	)]
 	pub repo_url: String,
 	#[serde(default = "default_limit")]
 	#[schemars(description = "Number of results to return (defaults to 10)")]
