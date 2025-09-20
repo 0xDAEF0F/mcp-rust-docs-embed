@@ -162,24 +162,43 @@ impl DataStore {
       repo_url: &str,
    ) -> Result<Option<EmbeddingMetadata>> {
       let collection_name = gen_table_name_for_repo(repo_url)?;
+      debug!(
+         "Getting metadata for collection: {} (from repo_url: {})",
+         collection_name, repo_url
+      );
 
       // Try to get the metadata point (ID 0)
-      let get_points = GetPointsBuilder::new(collection_name, vec![0.into()])
+      let get_points = GetPointsBuilder::new(collection_name.clone(), vec![0.into()])
          .with_payload(true)
          .build();
 
       match qdrant_client.get_points(get_points).await {
          Ok(response) => {
-            if let Some(point) = response.result.first()
-               && let Some(metadata_value) = point.payload.get("metadata")
-            {
-               let metadata: EmbeddingMetadata =
-                  serde_json::from_value(metadata_value.clone().into())?;
-               return Ok(Some(metadata));
+            debug!(
+               "Got response for collection {}, points found: {}",
+               collection_name,
+               response.result.len()
+            );
+            if let Some(point) = response.result.first() {
+               debug!(
+                  "Point payload keys: {:?}",
+                  point.payload.keys().collect::<Vec<_>>()
+               );
+               if let Some(metadata_value) = point.payload.get("metadata") {
+                  let metadata: EmbeddingMetadata =
+                     serde_json::from_value(metadata_value.clone().into())?;
+                  return Ok(Some(metadata));
+               }
             }
             Ok(None)
          }
-         Err(_) => Ok(None),
+         Err(e) => {
+            debug!(
+               "Error getting metadata for collection {}: {}",
+               collection_name, e
+            );
+            Ok(None)
+         }
       }
    }
 }

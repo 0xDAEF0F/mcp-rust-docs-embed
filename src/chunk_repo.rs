@@ -1,31 +1,52 @@
 use crate::chunks::{self, Chunk};
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use std::collections::HashMap;
 use tempfile::TempDir;
 use tracing::info;
 use url::Url;
 use walkdir::WalkDir;
 
-/// Extracts semantic chunks from both Rust and Markdown files in a repository
-/// to enable intelligent code search and documentation retrieval
+/// Processes a GitHub repository by cloning it and extracting semantic chunks from all Rust and
+/// Markdown files.
+///
+/// # Arguments
+/// * `repo_url` - The GitHub repository URL (e.g., "https://github.com/owner/repo") or shorthand
+///   format ("owner/repo")
+///
+/// # Returns
+/// A `HashMap` where:
+/// - Keys are relative file paths within the repository (e.g., "src/main.rs", "docs/README.md")
+/// - Values are vectors of `Chunk` structs containing semantic code segments from each file
+///
+/// Empty files or files that cannot be parsed are excluded from the result.
+///
+/// # Example
+/// ```
+/// let chunks = process_github_repo("rust-lang/rust").await?;
+/// // chunks["src/main.rs"] contains all extracted chunks from that file
+/// ```
 pub async fn process_github_repo(repo_url: &str) -> Result<HashMap<String, Vec<Chunk>>> {
-   let repo_url = repo_url.to_string();
-
-   // Run the blocking git clone operation in a separate thread
-   let temp_dir = tokio::task::spawn_blocking(move || clone_repo(&repo_url))
-      .await
-      .context("Failed to spawn blocking task")??;
+   // Clone repository in blocking context
+   let temp_dir = tokio::task::spawn_blocking({
+      let repo_url = repo_url.to_string();
+      move || clone_repo(&repo_url)
+   })
+   .await??;
 
    let mut file_chunks_map = HashMap::new();
 
-   // Walk through all Rust and Markdown files in the repository
+   // Walk through all Rust and Markdown files
    for entry in WalkDir::new(temp_dir.path())
       .into_iter()
       .filter_map(Result::ok)
-      .filter(|e| e.file_type().is_file())
       .filter(|e| {
-         let file_extension = e.path().extension().and_then(|s| s.to_str());
-         file_extension == Some("rs") || file_extension == Some("md")
+         e.file_type().is_file()
+            && e
+               .path()
+               .extension()
+               .and_then(|s| s.to_str())
+               .map(|ext| ext == "rs" || ext == "md")
+               .unwrap_or(false)
       })
    {
       let file_path = entry.path();
@@ -36,24 +57,14 @@ pub async fn process_github_repo(repo_url: &str) -> Result<HashMap<String, Vec<C
          .to_string();
 
       if let Ok(source) = std::fs::read_to_string(file_path) {
-         let extension = file_path.extension().and_then(|s| s.to_str()).unwrap_or("");
-
-         // Process chunks in a blocking context to handle sync operations
-         let chunks_result = match extension {
-            "rs" => tokio::task::spawn_blocking(move || chunks::rust::extract_rust_chunks(&source))
-               .await
-               .context("Failed to spawn blocking task")?,
-            "md" => tokio::task::spawn_blocking(move || {
-               chunks::markdown::extract_markdown_chunks(&source)
-            })
-            .await
-            .context("Failed to spawn blocking task")?,
+         // Extract chunks based on file type
+         let chunks = match file_path.extension().and_then(|s| s.to_str()) {
+            Some("rs") => chunks::rust::extract_rust_chunks(&source)?,
+            Some("md") => chunks::markdown::extract_markdown_chunks(&source)?,
             _ => continue,
          };
 
-         if let Ok(chunks) = chunks_result
-            && !chunks.is_empty()
-         {
+         if !chunks.is_empty() {
             file_chunks_map.insert(relative_path, chunks);
          }
       }

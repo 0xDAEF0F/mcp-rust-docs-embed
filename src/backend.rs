@@ -1,8 +1,12 @@
 use crate::{
+   data_store::DataStore,
    error::BackendError,
    github_processor::process_and_embed_github_repo,
    query::QueryService,
-   utils::{extract_repo_name_from_url, gen_table_name_for_repo, parse_repository_input},
+   utils::{
+      extract_repo_name_from_url, gen_table_name_for_repo, parse_collection_name_to_repo,
+      parse_repository_input,
+   },
 };
 use anyhow::{Context, Result};
 use rmcp::{
@@ -353,36 +357,42 @@ impl Backend {
          let name = collection.name;
 
          // parse collection name to extract repo name
-         // format is: repo_{owner}_{repo}
-         if let Some(repo_name) = name.strip_prefix("repo_") {
-            // convert back underscores to original characters
-            let repo_name = repo_name.replace('_', "/").replacen("/", "_", 1);
+         // format is: {owner}__{repo}
+         let repo_name = parse_collection_name_to_repo(&name);
 
-            // Try to get metadata for this collection
-            let metadata = crate::data_store::DataStore::get_metadata(
-               &qdrant_client,
-               &format!("https://github.com/{repo_name}"),
-            )
+         // Skip collections that don't look like repo names (don't contain /)
+         if !repo_name.contains('/') {
+            continue;
+         }
+
+         // Try to get metadata for this collection
+         let repo_url = format!("https://github.com/{}", repo_name);
+         tracing::debug!(
+            "Getting metadata for collection: {} (repo_url: {})",
+            name,
+            repo_url
+         );
+
+         let metadata = DataStore::get_metadata(&qdrant_client, &repo_url)
             .await
             .ok()
             .flatten();
 
-            let info = if let Some(meta) = metadata {
-               RepoInfo {
-                  repo_name,
-                  embedded_at: Some(meta.embedded_at.to_rfc3339()),
-                  doc_count: Some(meta.doc_count),
-               }
-            } else {
-               RepoInfo {
-                  repo_name,
-                  embedded_at: None,
-                  doc_count: None,
-               }
-            };
+         tracing::debug!("Metadata result for {}: {:?}", name, metadata.is_some());
 
-            repo_info.push(info);
-         }
+         let Some(meta) = metadata else {
+            // Skip collections without metadata - they may be incomplete or from older versions
+            tracing::warn!("Collection {} exists but has no metadata - skipping", name);
+            continue;
+         };
+
+         let info = RepoInfo {
+            repo_name,
+            embedded_at: Some(meta.embedded_at.to_rfc3339()),
+            doc_count: Some(meta.doc_count),
+         };
+
+         repo_info.push(info);
       }
 
       // sort repositories by name

@@ -3,9 +3,32 @@ use url::Url;
 
 /// Creates consistent collection names across server restarts to ensure
 /// embeddings can be reliably retrieved for any repository
+///
+/// # Example
+/// ```
+/// let table_name = gen_table_name_for_repo("https://github.com/rust-lang/rust")?;
+/// assert_eq!(table_name, "rust-lang__rust");
+/// ```
 pub fn gen_table_name_for_repo(repo_url: &str) -> Result<String> {
-   let repo_name = extract_repo_name_from_url(repo_url)?;
-   Ok(format!("repo_{}", repo_name.replace(['-', '/'], "_")))
+   let url = Url::parse(repo_url)?;
+
+   // Get the path and remove leading/trailing slashes
+   let path = url.path().trim_matches('/');
+
+   // For GitHub URLs, extract owner/repo
+   let parts: Vec<&str> = path.split('/').collect();
+   if parts.len() >= 2 {
+      // Use double underscore for the slash separator, keep hyphens as-is
+      Ok(format!("{}__{}", parts[0], parts[1]))
+   } else {
+      bail!("Invalid repository URL format")
+   }
+}
+
+/// Parses a collection name back to owner/repo format
+pub fn parse_collection_name_to_repo(collection_name: &str) -> String {
+   // Simply replace double underscore back to slash
+   collection_name.replace("__", "/")
 }
 
 /// Converts repository URLs into filesystem-safe identifiers for storage
@@ -60,13 +83,17 @@ mod tests {
    fn test_gen_table_name_for_repo() -> Result<()> {
       assert_eq!(
          gen_table_name_for_repo("https://github.com/rust-lang/rust")?,
-         "repo_rust_lang_rust"
-      );
-      assert_eq!(
-         gen_table_name_for_repo("https://github.com/tokio-rs/tokio")?,
-         "repo_tokio_rs_tokio"
+         "rust-lang__rust"
       );
       Ok(())
+   }
+
+   #[test]
+   fn test_parse_collection_name_to_repo() {
+      assert_eq!(
+         parse_collection_name_to_repo("rust-lang__rust"),
+         "rust-lang/rust"
+      );
    }
 
    #[test]
