@@ -14,4 +14,9 @@ pub enum ChunkKind {
    Impl,
    Comment,
    MarkdownSection,
+   // TypeScript-specific
+   Class,
+   Interface,
+   TypeAlias,
+   Const,
 }

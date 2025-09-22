@@ -45,7 +45,7 @@ pub async fn process_github_repo(repo_url: &str) -> Result<HashMap<String, Vec<C
                .path()
                .extension()
                .and_then(|s| s.to_str())
-               .map(|ext| ext == "rs" || ext == "md")
+               .map(|ext| ext == "rs" || ext == "md" || ext == "ts")
                .unwrap_or(false)
       })
    {
@@ -61,6 +61,7 @@ pub async fn process_github_repo(repo_url: &str) -> Result<HashMap<String, Vec<C
          let chunks = match file_path.extension().and_then(|s| s.to_str()) {
             Some("rs") => chunks::rust::extract_rust_chunks(&source)?,
             Some("md") => chunks::markdown::extract_markdown_chunks(&source)?,
+            Some("ts") => chunks::typescript::extract_typescript_chunks(&source)?,
             _ => continue,
          };
 
